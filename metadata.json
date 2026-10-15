@@ -1,0 +1,6 @@
+{
+  "name": "Matchora",
+  "description": "Live sports streaming, scores, schedules, and channels with Media3 ExoPlayer and built-in owner admin panel.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
