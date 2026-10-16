@@ -17,11 +17,15 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import coil.compose.SubcomposeAsyncImage
+import coil.request.ImageRequest
 import com.example.data.model.ChannelEntity
 import com.example.ui.theme.*
 
@@ -31,6 +35,10 @@ fun CategoriesScreen(
     onChannelClick: (ChannelEntity) -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val visibleChannels = androidx.compose.runtime.remember(channels) {
+        channels.filter { it.isEnabled }
+    }
+
     Column(
         modifier = modifier
             .fillMaxSize()
@@ -59,14 +67,14 @@ fun CategoriesScreen(
                     color = Color.White
                 )
                 Text(
-                    text = "${channels.size} authorized sports channels",
+                    text = "${visibleChannels.size} authorized sports channels",
                     fontSize = 12.sp,
                     color = TextSecondary
                 )
             }
         }
 
-        if (channels.isEmpty()) {
+        if (visibleChannels.isEmpty()) {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
@@ -105,7 +113,7 @@ fun CategoriesScreen(
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 items(
-                    items = channels,
+                    items = visibleChannels,
                     key = { it.id }
                 ) { channel ->
                     ChannelCard(
@@ -151,12 +159,46 @@ private fun ChannelCard(
                         .border(1.dp, TurquoisePrimary.copy(alpha = 0.35f), RoundedCornerShape(12.dp)),
                     contentAlignment = Alignment.Center
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.Tv,
-                        contentDescription = null,
-                        tint = TurquoisePrimary,
-                        modifier = Modifier.size(24.dp)
-                    )
+                    if (!channel.logoUrl.isNullOrBlank()) {
+                        SubcomposeAsyncImage(
+                            model = ImageRequest.Builder(LocalContext.current)
+                                .data(channel.logoUrl)
+                                .crossfade(true)
+                                .build(),
+                            contentDescription = "${channel.name} Logo",
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .clip(RoundedCornerShape(12.dp)),
+                            error = {
+                                Icon(
+                                    imageVector = Icons.Default.Tv,
+                                    contentDescription = null,
+                                    tint = TurquoisePrimary,
+                                    modifier = Modifier.size(24.dp)
+                                )
+                            },
+                            loading = {
+                                Box(
+                                    modifier = Modifier.fillMaxSize(),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    CircularProgressIndicator(
+                                        color = TurquoisePrimary,
+                                        strokeWidth = 2.dp,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                }
+                            }
+                        )
+                    } else {
+                        Icon(
+                            imageVector = Icons.Default.Tv,
+                            contentDescription = null,
+                            tint = TurquoisePrimary,
+                            modifier = Modifier.size(24.dp)
+                        )
+                    }
                 }
 
                 Spacer(modifier = Modifier.width(12.dp))

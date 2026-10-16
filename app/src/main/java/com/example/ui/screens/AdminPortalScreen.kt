@@ -27,10 +27,21 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.ui.layout.ContentScale
+import coil.compose.SubcomposeAsyncImage
+import coil.request.ImageRequest
 import com.example.data.model.*
 import com.example.ui.theme.*
+import com.example.util.HealthStatus
+import com.example.util.ImageStorageHelper
+import com.example.util.StreamHealthChecker
+import com.example.util.StreamHealthInfo
 import java.text.SimpleDateFormat
 import java.util.*
+import kotlinx.coroutines.launch
 
 enum class AdminTab {
     MATCHES,
@@ -73,6 +84,7 @@ fun AdminPortalScreen(
     var matchToEditScore by remember { mutableStateOf<MatchEntity?>(null) }
     var itemToDeleteConfirm by remember { mutableStateOf<Pair<String, () -> Unit>?>(null) }
     var showAddChannelDialog by remember { mutableStateOf(false) }
+    var channelToEdit by remember { mutableStateOf<ChannelEntity?>(null) }
     var showAddStreamDialogForChannel by remember { mutableStateOf<ChannelEntity?>(null) }
     var showAddSportDialog by remember { mutableStateOf(false) }
 
@@ -217,6 +229,7 @@ fun AdminPortalScreen(
                     AdminChannelsTab(
                         channels = channels,
                         onAddNewChannel = { showAddChannelDialog = true },
+                        onEditChannel = { channelToEdit = it },
                         onAddStreamSource = { showAddStreamDialogForChannel = it },
                         onToggleEnable = { ch ->
                             onSaveChannel(ch.copy(isEnabled = !ch.isEnabled))
@@ -225,6 +238,9 @@ fun AdminPortalScreen(
                             itemToDeleteConfirm = Pair("channel '${ch.name}'") {
                                 onDeleteChannel(ch)
                             }
+                        },
+                        onDeleteStreamSource = { ch, src ->
+                            onSaveChannel(ch.copy(streamSources = ch.streamSources.filter { it.id != src.id }))
                         }
                     )
                 }
@@ -321,6 +337,19 @@ fun AdminPortalScreen(
             onConfirm = { newChannel ->
                 onSaveChannel(newChannel)
                 showAddChannelDialog = false
+            }
+        )
+    }
+
+    // 4b. Edit Channel Dialog
+    channelToEdit?.let { channel ->
+        EditChannelDialog(
+            channel = channel,
+            sports = sports,
+            onDismiss = { channelToEdit = null },
+            onConfirm = { updatedChannel ->
+                onSaveChannel(updatedChannel)
+                channelToEdit = null
             }
         )
     }
@@ -665,14 +694,20 @@ private fun AdminMatchesTab(
 private fun AdminChannelsTab(
     channels: List<ChannelEntity>,
     onAddNewChannel: () -> Unit,
+    onEditChannel: (ChannelEntity) -> Unit,
     onAddStreamSource: (ChannelEntity) -> Unit,
     onToggleEnable: (ChannelEntity) -> Unit,
-    onDeleteChannel: (ChannelEntity) -> Unit
+    onDeleteChannel: (ChannelEntity) -> Unit,
+    onDeleteStreamSource: (ChannelEntity, StreamSource) -> Unit
 ) {
+    val coroutineScope = rememberCoroutineScope()
+    // In-memory temporary stream health map (avoids database migration)
+    val streamHealthMap = remember { mutableStateMapOf<String, StreamHealthInfo>() }
+
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(14.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp)
+        verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         item {
             Row(
@@ -680,12 +715,19 @@ private fun AdminChannelsTab(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(
-                    text = "BROADCAST CHANNELS & STREAMS",
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = TextSecondary
-                )
+                Column {
+                    Text(
+                        text = "BROADCAST CHANNELS & STREAMS",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = TextSecondary
+                    )
+                    Text(
+                        text = "${channels.count { it.isEnabled }} of ${channels.size} channels active",
+                        fontSize = 11.sp,
+                        color = TurquoiseSecondary
+                    )
+                }
                 Button(
                     onClick = onAddNewChannel,
                     colors = ButtonDefaults.buttonColors(containerColor = TurquoisePrimary),
@@ -698,45 +740,142 @@ private fun AdminChannelsTab(
             }
         }
 
+        if (channels.isEmpty()) {
+            item {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(containerColor = NavyCard),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Box(modifier = Modifier.padding(24.dp).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                        Text("No channels added yet. Click 'Add Channel' to create one.", color = TextMuted, fontSize = 13.sp)
+                    }
+                }
+            }
+        }
+
         items(channels, key = { it.id }) { channel ->
             Card(
                 modifier = Modifier.fillMaxWidth(),
-                colors = CardDefaults.cardColors(containerColor = NavyCard),
+                colors = CardDefaults.cardColors(
+                    containerColor = if (channel.isEnabled) NavyCard else NavyCard.copy(alpha = 0.75f)
+                ),
                 shape = RoundedCornerShape(14.dp),
-                border = androidx.compose.foundation.BorderStroke(1.dp, NavyBorder)
+                border = androidx.compose.foundation.BorderStroke(
+                    1.dp,
+                    if (channel.isEnabled) NavyBorder else NavyBorder.copy(alpha = 0.5f)
+                )
             ) {
                 Column(modifier = Modifier.padding(14.dp)) {
+                    // Header Row: Channel Logo, Details, Visibility & Switch
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        Column {
-                            Text(
-                                text = channel.name,
-                                fontSize = 15.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Color.White
-                            )
-                            Text(
-                                text = "Category: ${channel.categoryName}",
-                                fontSize = 11.sp,
-                                color = TurquoiseSecondary
-                            )
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            // Channel Picture / Thumbnail
+                            Box(
+                                modifier = Modifier
+                                    .size(46.dp)
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(TurquoisePrimary.copy(alpha = 0.15f))
+                                    .border(1.dp, TurquoisePrimary.copy(alpha = 0.35f), RoundedCornerShape(10.dp)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                if (!channel.logoUrl.isNullOrBlank()) {
+                                    SubcomposeAsyncImage(
+                                        model = ImageRequest.Builder(LocalContext.current)
+                                            .data(channel.logoUrl)
+                                            .crossfade(true)
+                                            .build(),
+                                        contentDescription = "${channel.name} Logo",
+                                        contentScale = ContentScale.Crop,
+                                        modifier = Modifier
+                                            .fillMaxSize()
+                                            .clip(RoundedCornerShape(10.dp)),
+                                        error = {
+                                            Icon(
+                                                imageVector = Icons.Default.Tv,
+                                                contentDescription = null,
+                                                tint = TurquoisePrimary,
+                                                modifier = Modifier.size(22.dp)
+                                            )
+                                        },
+                                        loading = {
+                                            CircularProgressIndicator(
+                                                color = TurquoisePrimary,
+                                                strokeWidth = 2.dp,
+                                                modifier = Modifier.size(16.dp)
+                                            )
+                                        }
+                                    )
+                                } else {
+                                    Icon(
+                                        imageVector = Icons.Default.Tv,
+                                        contentDescription = null,
+                                        tint = TurquoisePrimary,
+                                        modifier = Modifier.size(22.dp)
+                                    )
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.width(10.dp))
+
+                            Column {
+                                Text(
+                                    text = channel.name,
+                                    fontSize = 15.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color.White
+                                )
+                                Spacer(modifier = Modifier.height(2.dp))
+                                Text(
+                                    text = "Category: ${channel.categoryName}",
+                                    fontSize = 11.sp,
+                                    color = TurquoiseSecondary
+                                )
+                                Spacer(modifier = Modifier.height(3.dp))
+                                // Status badge
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(7.dp)
+                                            .clip(CircleShape)
+                                            .background(if (channel.isEnabled) NeonGreen else TextMuted)
+                                    )
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text(
+                                        text = if (channel.isEnabled) "Visible in App" else "Hidden from Users",
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.Medium,
+                                        color = if (channel.isEnabled) NeonGreen else TextMuted
+                                    )
+                                }
+                            }
                         }
 
-                        Switch(
-                            checked = channel.isEnabled,
-                            onCheckedChange = { onToggleEnable(channel) },
-                            colors = SwitchDefaults.colors(
-                                checkedThumbColor = TurquoisePrimary,
-                                checkedTrackColor = NavyCardElevated
+                        // Toggle enable/disable switch
+                        Column(horizontalAlignment = Alignment.End) {
+                            Switch(
+                                checked = channel.isEnabled,
+                                onCheckedChange = { onToggleEnable(channel) },
+                                colors = SwitchDefaults.colors(
+                                    checkedThumbColor = TurquoisePrimary,
+                                    checkedTrackColor = NavyCardElevated,
+                                    uncheckedThumbColor = TextMuted,
+                                    uncheckedTrackColor = NavySurface
+                                )
                             )
-                        )
+                        }
                     }
 
                     Spacer(modifier = Modifier.height(10.dp))
 
+                    // Configured Streams
                     Text(
                         text = "Configured Streams (${channel.streamSources.size}):",
                         fontSize = 11.sp,
@@ -744,48 +883,200 @@ private fun AdminChannelsTab(
                         color = TextSecondary
                     )
 
-                    Spacer(modifier = Modifier.height(4.dp))
+                    Spacer(modifier = Modifier.height(6.dp))
+
+                    if (channel.streamSources.isEmpty()) {
+                        Text(
+                            text = "No stream sources added. Add one below.",
+                            fontSize = 11.sp,
+                            color = TextMuted,
+                            modifier = Modifier.padding(vertical = 4.dp)
+                        )
+                    }
 
                     channel.streamSources.forEach { src ->
+                        val isM3u8 = src.protocol == StreamProtocol.HLS || src.url.contains(".m3u8", ignoreCase = true)
+                        val health = streamHealthMap[src.id]
+
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(vertical = 3.dp)
+                                .padding(vertical = 4.dp)
                                 .clip(RoundedCornerShape(8.dp))
                                 .background(NavySurface)
-                                .padding(8.dp)
+                                .border(1.dp, NavyBorder.copy(alpha = 0.5f), RoundedCornerShape(8.dp))
+                                .padding(10.dp)
                         ) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Column {
-                                    Text(
-                                        text = "${src.label} (${src.quality})",
-                                        fontSize = 12.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = Color.White
-                                    )
-                                    Text(
-                                        text = src.url,
-                                        fontSize = 10.sp,
-                                        color = TextMuted,
-                                        maxLines = 1
-                                    )
-                                }
-                                Box(
-                                    modifier = Modifier
-                                        .clip(RoundedCornerShape(4.dp))
-                                        .background(TurquoisePrimary.copy(alpha = 0.2f))
-                                        .padding(horizontal = 4.dp, vertical = 2.dp)
+                            Column(modifier = Modifier.fillMaxWidth()) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Text(
-                                        text = src.protocol.name,
-                                        fontSize = 9.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = TurquoisePrimary
-                                    )
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Text(
+                                                text = "${src.label} (${src.quality})",
+                                                fontSize = 12.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = Color.White
+                                            )
+                                            Spacer(modifier = Modifier.width(6.dp))
+                                            Box(
+                                                modifier = Modifier
+                                                    .clip(RoundedCornerShape(4.dp))
+                                                    .background(TurquoisePrimary.copy(alpha = 0.2f))
+                                                    .padding(horizontal = 5.dp, vertical = 2.dp)
+                                            ) {
+                                                Text(
+                                                    text = src.protocol.name,
+                                                    fontSize = 9.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = TurquoisePrimary
+                                                )
+                                            }
+                                        }
+                                        Spacer(modifier = Modifier.height(2.dp))
+                                        Text(
+                                            text = src.url,
+                                            fontSize = 10.sp,
+                                            color = TextMuted,
+                                            maxLines = 1
+                                        )
+                                    }
+
+                                    // Remove stream button
+                                    IconButton(
+                                        onClick = { onDeleteStreamSource(channel, src) },
+                                        modifier = Modifier.size(28.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Close,
+                                            contentDescription = "Remove Stream",
+                                            tint = TextMuted,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                    }
+                                }
+
+                                // M3U8 Health Check Section
+                                if (isM3u8) {
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.SpaceBetween
+                                    ) {
+                                        OutlinedButton(
+                                            onClick = {
+                                                coroutineScope.launch {
+                                                    streamHealthMap[src.id] = StreamHealthInfo(
+                                                        status = HealthStatus.CHECKING,
+                                                        details = "Checking..."
+                                                    )
+                                                    val res = StreamHealthChecker.checkM3u8Stream(src.url)
+                                                    streamHealthMap[src.id] = res
+                                                }
+                                            },
+                                            shape = RoundedCornerShape(8.dp),
+                                            border = androidx.compose.foundation.BorderStroke(
+                                                1.dp,
+                                                TurquoisePrimary.copy(alpha = 0.6f)
+                                            ),
+                                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                                            modifier = Modifier.height(28.dp)
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.Refresh,
+                                                contentDescription = "Check stream",
+                                                tint = TurquoisePrimary,
+                                                modifier = Modifier.size(14.dp)
+                                            )
+                                            Spacer(modifier = Modifier.width(4.dp))
+                                            Text(
+                                                text = if (health?.status == HealthStatus.CHECKING) "Checking..." else "Check stream",
+                                                fontSize = 10.sp,
+                                                color = TurquoisePrimary
+                                            )
+                                        }
+
+                                        // Status display
+                                        when (health?.status) {
+                                            HealthStatus.CHECKING -> {
+                                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                                    CircularProgressIndicator(
+                                                        color = TurquoisePrimary,
+                                                        strokeWidth = 2.dp,
+                                                        modifier = Modifier.size(12.dp)
+                                                    )
+                                                    Spacer(modifier = Modifier.width(4.dp))
+                                                    Text(
+                                                        text = "Checking...",
+                                                        fontSize = 11.sp,
+                                                        color = TurquoisePrimary
+                                                    )
+                                                }
+                                            }
+                                            HealthStatus.ONLINE -> {
+                                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                                    Icon(
+                                                        imageVector = Icons.Default.CheckCircle,
+                                                        contentDescription = "Online",
+                                                        tint = NeonGreen,
+                                                        modifier = Modifier.size(14.dp)
+                                                    )
+                                                    Spacer(modifier = Modifier.width(4.dp))
+                                                    Text(
+                                                        text = "Online (${health.lastCheckedTime})",
+                                                        fontSize = 11.sp,
+                                                        fontWeight = FontWeight.Medium,
+                                                        color = NeonGreen
+                                                    )
+                                                }
+                                            }
+                                            HealthStatus.OFFLINE -> {
+                                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                                    Icon(
+                                                        imageVector = Icons.Default.Cancel,
+                                                        contentDescription = "Offline",
+                                                        tint = NeonLiveRed,
+                                                        modifier = Modifier.size(14.dp)
+                                                    )
+                                                    Spacer(modifier = Modifier.width(4.dp))
+                                                    Text(
+                                                        text = "Offline (${health.details}) ${health.lastCheckedTime}",
+                                                        fontSize = 10.sp,
+                                                        fontWeight = FontWeight.Medium,
+                                                        color = NeonLiveRed
+                                                    )
+                                                }
+                                            }
+                                            HealthStatus.ERROR -> {
+                                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                                    Icon(
+                                                        imageVector = Icons.Default.ErrorOutline,
+                                                        contentDescription = "Error",
+                                                        tint = GoldStar,
+                                                        modifier = Modifier.size(14.dp)
+                                                    )
+                                                    Spacer(modifier = Modifier.width(4.dp))
+                                                    Text(
+                                                        text = "Error (${health.details}) ${health.lastCheckedTime}",
+                                                        fontSize = 10.sp,
+                                                        fontWeight = FontWeight.Medium,
+                                                        color = GoldStar
+                                                    )
+                                                }
+                                            }
+                                            else -> {
+                                                Text(
+                                                    text = "Unchecked",
+                                                    fontSize = 10.sp,
+                                                    color = TextMuted
+                                                )
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -793,27 +1084,58 @@ private fun AdminChannelsTab(
 
                     Spacer(modifier = Modifier.height(10.dp))
 
+                    // Channel Action Buttons: Edit, Add Stream, Delete
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        OutlinedButton(
-                            onClick = { onAddStreamSource(channel) },
-                            shape = RoundedCornerShape(8.dp),
-                            border = androidx.compose.foundation.BorderStroke(1.dp, TurquoisePrimary),
-                            modifier = Modifier.height(32.dp)
-                        ) {
-                            Icon(Icons.Default.AddLink, contentDescription = null, tint = TurquoisePrimary, modifier = Modifier.size(14.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text("Add Stream Source", fontSize = 11.sp, color = TurquoisePrimary)
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            OutlinedButton(
+                                onClick = { onEditChannel(channel) },
+                                shape = RoundedCornerShape(8.dp),
+                                border = androidx.compose.foundation.BorderStroke(1.dp, TurquoisePrimary),
+                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
+                                modifier = Modifier.height(32.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Edit,
+                                    contentDescription = null,
+                                    tint = TurquoisePrimary,
+                                    modifier = Modifier.size(14.dp)
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("Edit Channel", fontSize = 11.sp, color = TurquoisePrimary)
+                            }
+
+                            OutlinedButton(
+                                onClick = { onAddStreamSource(channel) },
+                                shape = RoundedCornerShape(8.dp),
+                                border = androidx.compose.foundation.BorderStroke(1.dp, TurquoiseSecondary),
+                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
+                                modifier = Modifier.height(32.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.AddLink,
+                                    contentDescription = null,
+                                    tint = TurquoiseSecondary,
+                                    modifier = Modifier.size(14.dp)
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("Add Stream", fontSize = 11.sp, color = TurquoiseSecondary)
+                            }
                         }
 
                         IconButton(
                             onClick = { onDeleteChannel(channel) },
                             modifier = Modifier.size(32.dp)
                         ) {
-                            Icon(Icons.Default.Delete, contentDescription = "Delete", tint = NeonLiveRed, modifier = Modifier.size(18.dp))
+                            Icon(
+                                imageVector = Icons.Default.Delete,
+                                contentDescription = "Delete Channel",
+                                tint = NeonLiveRed,
+                                modifier = Modifier.size(18.dp)
+                            )
                         }
                     }
                 }
@@ -1373,19 +1695,150 @@ private fun AddChannelDialog(
     onDismiss: () -> Unit,
     onConfirm: (ChannelEntity) -> Unit
 ) {
+    val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
+
     var name by remember { mutableStateOf("") }
     var category by remember { mutableStateOf("Football Live") }
     var selectedSportId by remember { mutableStateOf("football") }
     var streamUrl by remember { mutableStateOf("https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8") }
+    var logoUrl by remember { mutableStateOf<String?>(null) }
+    var isSavingImage by remember { mutableStateOf(false) }
+
+    val photoPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.PickVisualMedia()
+    ) { uri ->
+        if (uri != null) {
+            coroutineScope.launch {
+                isSavingImage = true
+                val saved = ImageStorageHelper.saveImageLocally(context, uri)
+                logoUrl = saved
+                isSavingImage = false
+            }
+        }
+    }
 
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Add Broadcast Channel", color = Color.White) },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedTextField(value = name, onValueChange = { name = it }, label = { Text("Channel Name") })
-                OutlinedTextField(value = category, onValueChange = { category = it }, label = { Text("Category (e.g. Cricket World)") })
-                OutlinedTextField(value = streamUrl, onValueChange = { streamUrl = it }, label = { Text("Authorized Stream URL") })
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                // Channel Logo / Picture Picker Section
+                Text(
+                    text = "Channel Logo / Thumbnail",
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = TextSecondary
+                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(54.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(TurquoisePrimary.copy(alpha = 0.15f))
+                            .border(1.dp, TurquoisePrimary.copy(alpha = 0.4f), RoundedCornerShape(12.dp)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        if (isSavingImage) {
+                            CircularProgressIndicator(
+                                color = TurquoisePrimary,
+                                strokeWidth = 2.dp,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        } else if (!logoUrl.isNullOrBlank()) {
+                            SubcomposeAsyncImage(
+                                model = ImageRequest.Builder(context)
+                                    .data(logoUrl)
+                                    .crossfade(true)
+                                    .build(),
+                                contentDescription = "Channel Logo Preview",
+                                contentScale = ContentScale.Crop,
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .clip(RoundedCornerShape(12.dp)),
+                                error = {
+                                    Icon(
+                                        imageVector = Icons.Default.Tv,
+                                        contentDescription = null,
+                                        tint = TurquoisePrimary,
+                                        modifier = Modifier.size(24.dp)
+                                    )
+                                }
+                            )
+                        } else {
+                            Icon(
+                                imageVector = Icons.Default.Tv,
+                                contentDescription = null,
+                                tint = TurquoisePrimary,
+                                modifier = Modifier.size(26.dp)
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.width(12.dp))
+
+                    Column {
+                        Button(
+                            onClick = {
+                                photoPickerLauncher.launch(
+                                    PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                                )
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = NavyCardElevated),
+                            shape = RoundedCornerShape(8.dp),
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                            modifier = Modifier.height(34.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.AddPhotoAlternate,
+                                contentDescription = null,
+                                tint = TurquoisePrimary,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = if (logoUrl.isNullOrBlank()) "Select Image" else "Change Image",
+                                fontSize = 11.sp,
+                                color = Color.White
+                            )
+                        }
+
+                        if (!logoUrl.isNullOrBlank()) {
+                            TextButton(
+                                onClick = { logoUrl = null },
+                                contentPadding = PaddingValues(0.dp),
+                                modifier = Modifier.height(24.dp)
+                            ) {
+                                Text("Remove picture", fontSize = 10.sp, color = NeonLiveRed)
+                            }
+                        }
+                    }
+                }
+
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = { name = it },
+                    label = { Text("Channel Name") },
+                    modifier = Modifier.fillMaxWidth()
+                )
+                OutlinedTextField(
+                    value = category,
+                    onValueChange = { category = it },
+                    label = { Text("Category (e.g. Cricket World)") },
+                    modifier = Modifier.fillMaxWidth()
+                )
+                OutlinedTextField(
+                    value = streamUrl,
+                    onValueChange = { streamUrl = it },
+                    label = { Text("Authorized Stream URL (.m3u8 / .mp4)") },
+                    modifier = Modifier.fillMaxWidth()
+                )
             }
         },
         confirmButton = {
@@ -1397,6 +1850,7 @@ private fun AddChannelDialog(
                             name = name,
                             sportId = selectedSportId,
                             categoryName = category,
+                            logoUrl = logoUrl?.ifBlank { null },
                             isEnabled = true,
                             streamSources = listOf(
                                 StreamSource(
@@ -1404,7 +1858,7 @@ private fun AddChannelDialog(
                                     label = "MAIN SERVER HD",
                                     url = streamUrl,
                                     quality = "1080p HD",
-                                    protocol = StreamProtocol.HLS
+                                    protocol = if (streamUrl.endsWith(".mpd")) StreamProtocol.DASH else if (streamUrl.endsWith(".mp4")) StreamProtocol.MP4 else StreamProtocol.HLS
                                 )
                             )
                         )
@@ -1413,7 +1867,178 @@ private fun AddChannelDialog(
                 },
                 colors = ButtonDefaults.buttonColors(containerColor = TurquoisePrimary)
             ) {
-                Text("Save Channel", color = NavyBackground)
+                Text("Save Channel", color = NavyBackground, fontWeight = FontWeight.Bold)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel", color = TextSecondary) }
+        },
+        containerColor = NavySurface
+    )
+}
+
+@Composable
+private fun EditChannelDialog(
+    channel: ChannelEntity,
+    sports: List<SportCategoryEntity>,
+    onDismiss: () -> Unit,
+    onConfirm: (ChannelEntity) -> Unit
+) {
+    val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
+
+    var name by remember { mutableStateOf(channel.name) }
+    var category by remember { mutableStateOf(channel.categoryName) }
+    var selectedSportId by remember { mutableStateOf(channel.sportId) }
+    var logoUrl by remember { mutableStateOf(channel.logoUrl) }
+    var isSavingImage by remember { mutableStateOf(false) }
+
+    val photoPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.PickVisualMedia()
+    ) { uri ->
+        if (uri != null) {
+            coroutineScope.launch {
+                isSavingImage = true
+                val saved = ImageStorageHelper.saveImageLocally(context, uri)
+                logoUrl = saved
+                isSavingImage = false
+            }
+        }
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Edit Broadcast Channel", color = Color.White) },
+        text = {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                // Channel Logo / Picture Picker Section
+                Text(
+                    text = "Channel Logo / Thumbnail",
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = TextSecondary
+                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(54.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(TurquoisePrimary.copy(alpha = 0.15f))
+                            .border(1.dp, TurquoisePrimary.copy(alpha = 0.4f), RoundedCornerShape(12.dp)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        if (isSavingImage) {
+                            CircularProgressIndicator(
+                                color = TurquoisePrimary,
+                                strokeWidth = 2.dp,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        } else if (!logoUrl.isNullOrBlank()) {
+                            SubcomposeAsyncImage(
+                                model = ImageRequest.Builder(context)
+                                    .data(logoUrl)
+                                    .crossfade(true)
+                                    .build(),
+                                contentDescription = "Channel Logo Preview",
+                                contentScale = ContentScale.Crop,
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .clip(RoundedCornerShape(12.dp)),
+                                error = {
+                                    Icon(
+                                        imageVector = Icons.Default.Tv,
+                                        contentDescription = null,
+                                        tint = TurquoisePrimary,
+                                        modifier = Modifier.size(24.dp)
+                                    )
+                                }
+                            )
+                        } else {
+                            Icon(
+                                imageVector = Icons.Default.Tv,
+                                contentDescription = null,
+                                tint = TurquoisePrimary,
+                                modifier = Modifier.size(26.dp)
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.width(12.dp))
+
+                    Column {
+                        Button(
+                            onClick = {
+                                photoPickerLauncher.launch(
+                                    PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                                )
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = NavyCardElevated),
+                            shape = RoundedCornerShape(8.dp),
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                            modifier = Modifier.height(34.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.AddPhotoAlternate,
+                                contentDescription = null,
+                                tint = TurquoisePrimary,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = if (logoUrl.isNullOrBlank()) "Select Image" else "Change Image",
+                                fontSize = 11.sp,
+                                color = Color.White
+                            )
+                        }
+
+                        if (!logoUrl.isNullOrBlank()) {
+                            TextButton(
+                                onClick = { logoUrl = null },
+                                contentPadding = PaddingValues(0.dp),
+                                modifier = Modifier.height(24.dp)
+                            ) {
+                                Text("Remove picture", fontSize = 10.sp, color = NeonLiveRed)
+                            }
+                        }
+                    }
+                }
+
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = { name = it },
+                    label = { Text("Channel Name") },
+                    modifier = Modifier.fillMaxWidth()
+                )
+                OutlinedTextField(
+                    value = category,
+                    onValueChange = { category = it },
+                    label = { Text("Category (e.g. Football Live)") },
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    if (name.isNotBlank()) {
+                        val updated = channel.copy(
+                            name = name,
+                            categoryName = category,
+                            sportId = selectedSportId,
+                            logoUrl = logoUrl?.ifBlank { null }
+                        )
+                        onConfirm(updated)
+                    }
+                },
+                colors = ButtonDefaults.buttonColors(containerColor = TurquoisePrimary)
+            ) {
+                Text("Update Channel", color = NavyBackground, fontWeight = FontWeight.Bold)
             }
         },
         dismissButton = {
