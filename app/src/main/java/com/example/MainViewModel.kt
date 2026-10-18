@@ -6,7 +6,10 @@ import androidx.lifecycle.viewModelScope
 import com.example.data.model.*
 import com.example.data.repository.SportsRepository
 import com.example.ui.components.BottomNavDestination
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
 enum class AppScreen {
@@ -28,6 +31,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _isSyncing = MutableStateFlow(false)
     val isSyncing: StateFlow<Boolean> = _isSyncing.asStateFlow()
 
+    private val _syncMessage = MutableStateFlow<String?>(null)
+    val syncMessage: StateFlow<String?> = _syncMessage.asStateFlow()
+
+    private val _noStreamsMessage = MutableStateFlow<String?>(null)
+    val noStreamsMessage: StateFlow<String?> = _noStreamsMessage.asStateFlow()
+
     // Active Player state
     private val _activePlayerMatch = MutableStateFlow<MatchEntity?>(null)
     val activePlayerMatch: StateFlow<MatchEntity?> = _activePlayerMatch.asStateFlow()
@@ -41,6 +50,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     // Stream Selection Dialog state
     private val _streamDialogData = MutableStateFlow<Pair<MatchEntity?, List<StreamSource>>?>(null)
     val streamDialogData: StateFlow<Pair<MatchEntity?, List<StreamSource>>?> = _streamDialogData.asStateFlow()
+
+    // Foreground tracking for power & rate-limit friendly auto-sync
+    private val _isAppInForeground = MutableStateFlow(true)
+
+    private var autoSyncJob: Job? = null
 
     val allMatches: StateFlow<List<MatchEntity>> = repository.allMatches
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
@@ -71,6 +85,47 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     val isAdminAuthenticated: StateFlow<Boolean> = repository.isAdminAuthenticated
 
+    init {
+        startAutoSyncLoop()
+    }
+
+    private fun startAutoSyncLoop() {
+        autoSyncJob?.cancel()
+        autoSyncJob = viewModelScope.launch {
+            while (isActive) {
+                val config = systemConfig.value ?: SystemConfigEntity()
+                val isForeground = _isAppInForeground.value
+
+                if (isForeground && config.autoSyncEnabled) {
+                    val hasLiveMatches = liveMatches.value.isNotEmpty()
+                    val intervalMillis = if (hasLiveMatches) {
+                        (config.liveRefreshIntervalSeconds.coerceIn(15, 120)) * 1000L
+                    } else {
+                        (config.scheduleRefreshIntervalMinutes.coerceIn(2, 60)) * 60 * 1000L
+                    }
+                    delay(intervalMillis)
+                    if (_isAppInForeground.value) {
+                        repository.syncSportsApi()
+                    }
+                } else {
+                    // Pause/slow polling when backgrounded
+                    delay(30_000L)
+                }
+            }
+        }
+    }
+
+    fun setAppForegroundState(isForeground: Boolean) {
+        _isAppInForeground.value = isForeground
+        if (isForeground) {
+            // Trigger a quick check on resume if last sync is stale (> 2 mins)
+            val lastSync = systemConfig.value?.lastSyncTimestamp ?: 0L
+            if (System.currentTimeMillis() - lastSync > 2 * 60 * 1000L) {
+                refreshData()
+            }
+        }
+    }
+
     fun isOwnerPasswordSet(): Boolean = repository.isOwnerPasswordSet()
 
     fun onSplashFinished() {
@@ -90,31 +145,29 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun onMatchClicked(match: MatchEntity) {
-        if (match.streamSources.size > 1) {
-            _streamDialogData.value = Pair(match, match.streamSources)
-        } else if (match.streamSources.isNotEmpty()) {
-            launchPlayerForMatch(match, match.streamSources)
+        val enabledStreams = match.streamSources.filter { it.isEnabled }.sortedBy { it.sortOrder }
+        if (enabledStreams.size > 1) {
+            _streamDialogData.value = Pair(match, enabledStreams)
+        } else if (enabledStreams.size == 1) {
+            launchPlayerForMatch(match, enabledStreams)
         } else {
-            // Default test stream fallback if match has no stream
-            val defaultStream = listOf(
-                StreamSource(
-                    id = "default_${match.id}",
-                    label = "FAST SERVER HD",
-                    url = "https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8",
-                    quality = "1080p HD",
-                    protocol = StreamProtocol.HLS
-                )
-            )
-            launchPlayerForMatch(match, defaultStream)
+            _noStreamsMessage.value = "No authorized streams are available for ${match.homeTeam} vs ${match.awayTeam} yet."
         }
     }
 
+    fun clearNoStreamsMessage() {
+        _noStreamsMessage.value = null
+    }
+
     fun onChannelClicked(channel: ChannelEntity) {
-        if (channel.streamSources.size > 1) {
-            _streamDialogData.value = Pair(null, channel.streamSources)
+        val enabledStreams = channel.streamSources.filter { it.isEnabled }.sortedBy { it.sortOrder }
+        if (enabledStreams.size > 1) {
+            _streamDialogData.value = Pair(null, enabledStreams)
             _activePlayerChannel.value = channel
-        } else if (channel.streamSources.isNotEmpty()) {
-            launchPlayerForChannel(channel, channel.streamSources)
+        } else if (enabledStreams.size == 1) {
+            launchPlayerForChannel(channel, enabledStreams)
+        } else {
+            _noStreamsMessage.value = "No authorized streams available for ${channel.name}."
         }
     }
 
@@ -124,9 +177,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val channel = _activePlayerChannel.value
 
         if (match != null) {
-            launchPlayerForMatch(match, listOf(source) + match.streamSources.filter { it.id != source.id })
+            val enabledOtherStreams = match.streamSources.filter { it.isEnabled && it.id != source.id }.sortedBy { it.sortOrder }
+            launchPlayerForMatch(match, listOf(source) + enabledOtherStreams)
         } else if (channel != null) {
-            launchPlayerForChannel(channel, listOf(source) + channel.streamSources.filter { it.id != source.id })
+            val enabledOtherStreams = channel.streamSources.filter { it.isEnabled && it.id != source.id }.sortedBy { it.sortOrder }
+            launchPlayerForChannel(channel, listOf(source) + enabledOtherStreams)
         }
         _streamDialogData.value = null
     }
@@ -158,9 +213,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun refreshData() {
         viewModelScope.launch {
             _isSyncing.value = true
-            repository.syncSportsApi()
+            val (success, message) = repository.syncSportsApi()
+            _syncMessage.value = message
             _isSyncing.value = false
         }
+    }
+
+    fun clearSyncMessage() {
+        _syncMessage.value = null
     }
 
     // Owner Auth
@@ -176,7 +236,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         repository.setOwnerPassword(password)
     }
 
-    // Admin CRUD
+    // Admin CRUD & Match Overrides
     fun saveMatch(match: MatchEntity) {
         viewModelScope.launch {
             repository.addOrUpdateMatch(match)
@@ -195,6 +255,57 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun saveMatchOverride(
+        matchId: String,
+        scoreHome: Int?,
+        scoreAway: Int?,
+        status: MatchStatus,
+        matchTime: String,
+        venue: String? = null
+    ) {
+        viewModelScope.launch {
+            repository.saveMatchOverride(matchId, scoreHome, scoreAway, status, matchTime, venue)
+        }
+    }
+
+    fun restoreProviderMatchValues(matchId: String) {
+        viewModelScope.launch {
+            repository.restoreProviderMatchValues(matchId)
+        }
+    }
+
+    // Match Stream Management
+    fun addOrUpdateMatchStream(matchId: String, stream: StreamSource) {
+        viewModelScope.launch {
+            repository.addOrUpdateMatchStream(matchId, stream)
+        }
+    }
+
+    fun deleteMatchStream(matchId: String, streamId: String) {
+        viewModelScope.launch {
+            repository.deleteMatchStream(matchId, streamId)
+        }
+    }
+
+    fun toggleMatchStreamEnabled(matchId: String, streamId: String, isEnabled: Boolean) {
+        viewModelScope.launch {
+            repository.toggleMatchStreamEnabled(matchId, streamId, isEnabled)
+        }
+    }
+
+    fun reorderMatchStreams(matchId: String, streams: List<StreamSource>) {
+        viewModelScope.launch {
+            repository.reorderMatchStreams(matchId, streams)
+        }
+    }
+
+    fun assignChannelStreamToMatch(matchId: String, channelStream: StreamSource) {
+        viewModelScope.launch {
+            repository.assignChannelStreamToMatch(matchId, channelStream)
+        }
+    }
+
+    // Channel CRUD
     fun saveChannel(channel: ChannelEntity) {
         viewModelScope.launch {
             repository.addOrUpdateChannel(channel)
@@ -207,6 +318,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    // Sport CRUD
     fun saveSport(sport: SportCategoryEntity) {
         viewModelScope.launch {
             repository.addOrUpdateSport(sport)
@@ -219,6 +331,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    // System Config
     fun saveConfig(config: SystemConfigEntity) {
         viewModelScope.launch {
             repository.updateSystemConfig(config)

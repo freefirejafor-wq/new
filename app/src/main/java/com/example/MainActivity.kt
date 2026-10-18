@@ -10,17 +10,28 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.TvOff
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.data.model.MatchStatus
 import com.example.ui.components.BottomNavDestination
 import com.example.ui.components.MatchoraBottomBar
 import com.example.ui.components.StreamSourceDialog
 import com.example.ui.screens.*
-import com.example.ui.theme.MatchoraTheme
-import com.example.ui.theme.NavyBackground
+import com.example.ui.theme.*
 
 class MainActivity : ComponentActivity() {
     private val viewModel: MainViewModel by viewModels()
@@ -50,6 +61,7 @@ class MainActivity : ComponentActivity() {
                 val activePlayerChannel by viewModel.activePlayerChannel.collectAsStateWithLifecycle()
                 val activeStreamSources by viewModel.activeStreamSources.collectAsStateWithLifecycle()
                 val streamDialogData by viewModel.streamDialogData.collectAsStateWithLifecycle()
+                val noStreamsMessage by viewModel.noStreamsMessage.collectAsStateWithLifecycle()
 
                 Box(
                     modifier = Modifier
@@ -90,6 +102,27 @@ class MainActivity : ComponentActivity() {
                                 onDeleteMatch = { viewModel.deleteMatch(it) },
                                 onUpdateMatchScore = { id, home, away, time, status ->
                                     viewModel.updateMatchScore(id, home, away, time, status)
+                                },
+                                onSaveMatchOverride = { id, home, away, status, time, venue ->
+                                    viewModel.saveMatchOverride(id, home, away, status, time, venue)
+                                },
+                                onRestoreProviderValues = { id ->
+                                    viewModel.restoreProviderMatchValues(id)
+                                },
+                                onAddOrUpdateMatchStream = { matchId, stream ->
+                                    viewModel.addOrUpdateMatchStream(matchId, stream)
+                                },
+                                onDeleteMatchStream = { matchId, streamId ->
+                                    viewModel.deleteMatchStream(matchId, streamId)
+                                },
+                                onToggleMatchStreamEnabled = { matchId, streamId, enabled ->
+                                    viewModel.toggleMatchStreamEnabled(matchId, streamId, enabled)
+                                },
+                                onReorderMatchStreams = { matchId, reordered ->
+                                    viewModel.reorderMatchStreams(matchId, reordered)
+                                },
+                                onAssignChannelStreamToMatch = { matchId, chStream ->
+                                    viewModel.assignChannelStreamToMatch(matchId, chStream)
                                 },
                                 onSaveChannel = { viewModel.saveChannel(it) },
                                 onDeleteChannel = { viewModel.deleteChannel(it) },
@@ -184,6 +217,43 @@ class MainActivity : ComponentActivity() {
                             streamSources = sources,
                             onSelectSource = { src -> viewModel.selectStreamSource(src) },
                             onDismiss = { viewModel.dismissStreamDialog() }
+                        )
+                    }
+
+                    // No Authorized Streams Alert Dialog
+                    noStreamsMessage?.let { msg ->
+                        AlertDialog(
+                            onDismissRequest = { viewModel.clearNoStreamsMessage() },
+                            icon = {
+                                Icon(
+                                    imageVector = Icons.Default.TvOff,
+                                    contentDescription = null,
+                                    tint = NeonLiveRed,
+                                    modifier = Modifier.size(32.dp)
+                                )
+                            },
+                            title = {
+                                Text(
+                                    text = "No Streams Available",
+                                    fontSize = 17.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color.White
+                                )
+                            },
+                            text = {
+                                Text(
+                                    text = msg,
+                                    fontSize = 13.sp,
+                                    color = TextSecondary
+                                )
+                            },
+                            confirmButton = {
+                                TextButton(onClick = { viewModel.clearNoStreamsMessage() }) {
+                                    Text("OK", color = TurquoisePrimary, fontWeight = FontWeight.Bold)
+                                }
+                            },
+                            containerColor = NavySurface,
+                            shape = RoundedCornerShape(18.dp)
                         )
                     }
                 }

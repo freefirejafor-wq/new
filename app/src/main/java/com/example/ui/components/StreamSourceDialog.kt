@@ -88,7 +88,7 @@ fun StreamSourceDialog(
                 Spacer(modifier = Modifier.height(4.dp))
 
                 Text(
-                    text = title.ifEmpty { "Choose your preferred stream" },
+                    text = title.ifEmpty { "Select an authorized stream source" },
                     fontSize = 13.sp,
                     color = TextSecondary,
                     textAlign = TextAlign.Center
@@ -195,22 +195,63 @@ private fun StreamOptionItem(
                 modifier = Modifier.weight(1f)
             ) {
                 Icon(
-                    imageVector = Icons.Default.FormatListBulleted,
+                    imageVector = Icons.Default.PlayCircle,
                     contentDescription = null,
                     tint = TurquoisePrimary,
-                    modifier = Modifier.size(20.dp)
+                    modifier = Modifier.size(24.dp)
                 )
                 Spacer(modifier = Modifier.width(10.dp))
                 Column {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            text = source.label,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White
+                        )
+                        if (source.isAuthorized) {
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(4.dp))
+                                    .background(Color(0xFF10B981).copy(alpha = 0.2f))
+                                    .padding(horizontal = 5.dp, vertical = 2.dp)
+                            ) {
+                                Text(
+                                    text = "Verified",
+                                    fontSize = 9.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color(0xFF10B981)
+                                )
+                            }
+                        }
+                        if (source.isBackup) {
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(4.dp))
+                                    .background(Color(0xFFF59E0B).copy(alpha = 0.2f))
+                                    .padding(horizontal = 5.dp, vertical = 2.dp)
+                            ) {
+                                Text(
+                                    text = "Fallback",
+                                    fontSize = 9.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color(0xFFF59E0B)
+                                )
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(2.dp))
+
                     Text(
-                        text = source.label.uppercase(),
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = Color.White
-                    )
-                    Text(
-                        text = "${source.protocol.name} • ${if (source.isAuthorized) "Verified Source" else "Unverified"}",
-                        fontSize = 10.sp,
+                        text = buildString {
+                            append(source.protocol.name)
+                            if (source.language.isNotBlank()) append(" • ${source.language}")
+                            if (source.region.isNotBlank() && source.region != "Global") append(" • ${source.region}")
+                        },
+                        fontSize = 11.sp,
                         color = TextSecondary
                     )
                 }
@@ -225,7 +266,7 @@ private fun StreamOptionItem(
                         .padding(horizontal = 7.dp, vertical = 3.dp)
                 ) {
                     Text(
-                        text = if (source.quality.contains("HD", ignoreCase = true)) "HD" else "SD",
+                        text = source.quality,
                         fontSize = 11.sp,
                         fontWeight = FontWeight.ExtraBold,
                         color = TurquoisePrimary

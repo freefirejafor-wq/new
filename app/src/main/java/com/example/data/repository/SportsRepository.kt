@@ -2,8 +2,12 @@ package com.example.data.repository
 
 import android.content.Context
 import android.content.SharedPreferences
+import com.example.data.api.ApiFootballProvider
+import com.example.data.api.EspnSoccerProvider
+import com.example.data.api.SportsMatchProvider
 import com.example.data.local.MatchoraDatabase
 import com.example.data.model.*
+import com.example.util.DateTimeHelper
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
@@ -14,6 +18,7 @@ import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.security.MessageDigest
+import java.util.UUID
 
 class SportsRepository(private val context: Context) {
     private val database = MatchoraDatabase.getDatabase(context)
@@ -36,6 +41,8 @@ class SportsRepository(private val context: Context) {
     init {
         CoroutineScope(Dispatchers.IO).launch {
             seedInitialDataIfNeeded()
+            // Attempt an immediate background sync with the configured provider
+            syncSportsApi()
         }
     }
 
@@ -56,261 +63,89 @@ class SportsRepository(private val context: Context) {
 
         val config = dao.getSystemConfig().firstOrNull()
         if (config == null) {
-            dao.setSystemConfig(SystemConfigEntity())
+            dao.setSystemConfig(
+                SystemConfigEntity(
+                    sportsApiProvider = "ESPN Soccer Scoreboard",
+                    autoSyncEnabled = true,
+                    autoSyncIntervalMinutes = 5,
+                    liveRefreshIntervalSeconds = 30,
+                    scheduleRefreshIntervalMinutes = 10,
+                    displayTimezone = "Asia/Dhaka",
+                    isUsingDemoData = false
+                )
+            )
         }
 
+        // Demo matches with NO hardcoded server options.
+        // Match streams must be explicitly added and enabled by an admin.
         val matchesCount = dao.getAllMatches().firstOrNull()?.size ?: 0
         if (matchesCount == 0) {
-            val sampleStreams1 = listOf(
-                StreamSource(
-                    id = "s1_hls",
-                    label = "FAST SERVER HD",
-                    url = "https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8",
-                    quality = "1080p HD",
-                    protocol = StreamProtocol.HLS,
-                    isAuthorized = true
-                ),
-                StreamSource(
-                    id = "s1_sd",
-                    label = "SD SERVER",
-                    url = "https://cph-p2p-msl.akamaized.net/hls/live/2000341/test/master.m3u8",
-                    quality = "720p SD",
-                    protocol = StreamProtocol.HLS,
-                    isAuthorized = true
-                ),
-                StreamSource(
-                    id = "s1_mp4",
-                    label = "BACKUP MP4 (Legal Demo)",
-                    url = "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4",
-                    quality = "720p SD",
-                    protocol = StreamProtocol.MP4,
-                    isAuthorized = true,
-                    isBackup = true
-                )
-            )
-
-            val sampleStreams2 = listOf(
-                StreamSource(
-                    id = "s2_fast",
-                    label = "ULTRA FAST SERVER",
-                    url = "https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8",
-                    quality = "1080p FHD",
-                    protocol = StreamProtocol.HLS,
-                    isAuthorized = true
-                ),
-                StreamSource(
-                    id = "s2_alt",
-                    label = "STANDARD STREAM",
-                    url = "https://cph-p2p-msl.akamaized.net/hls/live/2000341/test/master.m3u8",
-                    quality = "720p HD",
-                    protocol = StreamProtocol.HLS,
-                    isAuthorized = true
-                )
-            )
-
-            val demoMatches = listOf(
+            val initialDemoFixtures = listOf(
                 MatchEntity(
-                    id = "m1",
+                    id = "demo_m1",
+                    providerMatchId = "demo_1",
+                    providerName = "DEMO",
                     sportId = "football",
                     sportName = "Football",
-                    competition = "FOOTBALL | SAUDI PRO LEAGUE",
-                    homeTeam = "Al Faisaly",
-                    homeLogoUrl = "https://api.iconify.design/emojione-v1:soccer-ball.svg",
-                    awayTeam = "Al-Kholood",
-                    awayLogoUrl = "https://api.iconify.design/emojione-v1:soccer-ball.svg",
+                    competition = "FOOTBALL | PREMIER LEAGUE",
+                    homeTeam = "Arsenal",
+                    awayTeam = "Chelsea",
                     scoreHome = 2,
                     scoreAway = 1,
                     matchStatus = MatchStatus.LIVE,
-                    matchTime = "68:55",
-                    scheduledDate = "15/10/2026",
+                    matchTime = "68'",
+                    utcTimestamp = System.currentTimeMillis() - 70 * 60 * 1000L,
+                    scheduledDate = DateTimeHelper.formatMatchDate(System.currentTimeMillis(), "Asia/Dhaka"),
                     startsInText = null,
                     isFavorite = true,
-                    streamSources = sampleStreams1,
+                    streamSources = emptyList(), // No hardcoded demo streams
                     isDemoData = true,
-                    venue = "King Salman Sport City Stadium"
+                    venue = "Emirates Stadium"
                 ),
                 MatchEntity(
-                    id = "m2",
+                    id = "demo_m2",
+                    providerMatchId = "demo_2",
+                    providerName = "DEMO",
                     sportId = "football",
                     sportName = "Football",
-                    competition = "FOOTBALL | SAUDI PRO LEAGUE",
-                    homeTeam = "Al-Khaleej",
-                    awayTeam = "Al-Fayha",
-                    scoreHome = 0,
-                    scoreAway = 0,
-                    matchStatus = MatchStatus.LIVE,
-                    matchTime = "19:07",
-                    scheduledDate = "15/10/2026",
-                    startsInText = null,
-                    isFavorite = false,
-                    streamSources = sampleStreams2,
-                    isDemoData = true,
-                    venue = "Prince Nayef bin Abdulaziz Stadium"
-                ),
-                MatchEntity(
-                    id = "m3",
-                    sportId = "football",
-                    sportName = "Football",
-                    competition = "FOOTBALL | SAUDI PRO LEAGUE",
-                    homeTeam = "Al-Hazem",
-                    awayTeam = "Al-Fateh",
-                    scoreHome = null,
-                    scoreAway = null,
-                    matchStatus = MatchStatus.UPCOMING,
-                    matchTime = "09:15 PM",
-                    scheduledDate = "15/10/2026",
-                    startsInText = "Starts in 55 min",
-                    isFavorite = false,
-                    streamSources = sampleStreams1,
-                    isDemoData = true,
-                    venue = "Al-Hazem Club Stadium"
-                ),
-                MatchEntity(
-                    id = "m4",
-                    sportId = "football",
-                    sportName = "Football",
-                    competition = "FOOTBALL | UEFA EUROPA LEAGUE",
-                    homeTeam = "Torreense",
-                    awayTeam = "Sunderland",
-                    scoreHome = null,
-                    scoreAway = null,
-                    matchStatus = MatchStatus.UPCOMING,
-                    matchTime = "10:45 PM",
-                    scheduledDate = "15/10/2026",
-                    startsInText = "Starts in 1 hour",
-                    isFavorite = true,
-                    streamSources = sampleStreams2,
-                    isDemoData = true,
-                    venue = "Estadio Manuel Marques"
-                ),
-                MatchEntity(
-                    id = "m5",
-                    sportId = "football",
-                    sportName = "Football",
-                    competition = "FOOTBALL | UEFA EUROPA LEAGUE",
-                    homeTeam = "USG",
-                    awayTeam = "Real Sociedad",
-                    scoreHome = null,
-                    scoreAway = null,
-                    matchStatus = MatchStatus.UPCOMING,
-                    matchTime = "10:45 PM",
-                    scheduledDate = "15/10/2026",
-                    startsInText = "Starts in 1 hour",
-                    isFavorite = false,
-                    streamSources = sampleStreams1,
-                    isDemoData = true,
-                    venue = "Joseph Marien Stadium"
-                ),
-                MatchEntity(
-                    id = "m6",
-                    sportId = "football",
-                    sportName = "Football",
-                    competition = "FOOTBALL | UEFA CONFERENCE LEAGUE",
-                    homeTeam = "KuPS",
-                    awayTeam = "Trabzonspor",
-                    scoreHome = null,
-                    scoreAway = null,
-                    matchStatus = MatchStatus.UPCOMING,
-                    matchTime = "10:45 PM",
-                    scheduledDate = "15/10/2026",
-                    startsInText = "Starts in 1 hour",
-                    isFavorite = false,
-                    streamSources = sampleStreams2,
-                    isDemoData = true,
-                    venue = "Väre Areena"
-                ),
-                MatchEntity(
-                    id = "m7",
-                    sportId = "football",
-                    sportName = "Football",
-                    competition = "FOOTBALL | AFC CHAMPIONS LEAGUE TWO",
-                    homeTeam = "Gangwon",
-                    awayTeam = "PPCFC",
-                    scoreHome = 3,
+                    competition = "FOOTBALL | LA LIGA",
+                    homeTeam = "Real Madrid",
+                    awayTeam = "Barcelona",
+                    scoreHome = 1,
                     scoreAway = 1,
-                    matchStatus = MatchStatus.FINISHED,
-                    matchTime = "04:00 PM",
-                    scheduledDate = "15/10/2026",
-                    startsInText = "Event Finished",
+                    matchStatus = MatchStatus.HALFTIME,
+                    matchTime = "HT",
+                    utcTimestamp = System.currentTimeMillis() - 50 * 60 * 1000L,
+                    scheduledDate = DateTimeHelper.formatMatchDate(System.currentTimeMillis(), "Asia/Dhaka"),
+                    startsInText = "Half Time",
                     isFavorite = false,
-                    streamSources = sampleStreams1,
+                    streamSources = emptyList(),
                     isDemoData = true,
-                    venue = "Chuncheon Songam Stadium"
+                    venue = "Santiago Bernabéu"
                 ),
                 MatchEntity(
-                    id = "m8",
-                    sportId = "boxing",
-                    sportName = "Boxing",
-                    competition = "BOXING | ONE FRIDAY FIGHTS",
-                    homeTeam = "Superlek",
-                    awayTeam = "Rodtang",
+                    id = "demo_m3",
+                    providerMatchId = "demo_3",
+                    providerName = "DEMO",
+                    sportId = "football",
+                    sportName = "Football",
+                    competition = "FOOTBALL | UEFA CHAMPIONS LEAGUE",
+                    homeTeam = "Bayern Munich",
+                    awayTeam = "Paris Saint-Germain",
                     scoreHome = null,
                     scoreAway = null,
                     matchStatus = MatchStatus.UPCOMING,
-                    matchTime = "06:00 PM",
-                    scheduledDate = "16/10/2026",
-                    startsInText = "Starts in 20 hours",
-                    isFavorite = true,
-                    streamSources = sampleStreams2,
-                    isDemoData = true,
-                    venue = "Lumpinee Boxing Stadium"
-                ),
-                MatchEntity(
-                    id = "m9",
-                    sportId = "cricket",
-                    sportName = "Cricket",
-                    competition = "CRICKET | ICC CHAMPIONS TROPHY",
-                    homeTeam = "India",
-                    awayTeam = "Australia",
-                    scoreHome = 284,
-                    scoreAway = 210,
-                    matchStatus = MatchStatus.LIVE,
-                    matchTime = "42.3 Overs",
-                    scheduledDate = "15/10/2026",
-                    startsInText = null,
-                    isFavorite = true,
-                    streamSources = sampleStreams1,
-                    isDemoData = true,
-                    venue = "Melbourne Cricket Ground"
-                ),
-                MatchEntity(
-                    id = "m10",
-                    sportId = "basketball",
-                    sportName = "Basketball",
-                    competition = "BASKETBALL | NBA REGULAR SEASON",
-                    homeTeam = "Lakers",
-                    awayTeam = "Warriors",
-                    scoreHome = 108,
-                    scoreAway = 112,
-                    matchStatus = MatchStatus.FINISHED,
-                    matchTime = "Final",
-                    scheduledDate = "14/10/2026",
-                    startsInText = "Event Finished",
+                    matchTime = "09:00 PM",
+                    utcTimestamp = System.currentTimeMillis() + 4 * 60 * 60 * 1000L,
+                    scheduledDate = DateTimeHelper.formatMatchDate(System.currentTimeMillis() + 4 * 60 * 60 * 1000L, "Asia/Dhaka"),
+                    startsInText = "Starts in 4 hours",
                     isFavorite = false,
-                    streamSources = sampleStreams2,
+                    streamSources = emptyList(),
                     isDemoData = true,
-                    venue = "Crypto.com Arena"
-                ),
-                MatchEntity(
-                    id = "m11",
-                    sportId = "motorsports",
-                    sportName = "Motorsports",
-                    competition = "MOTORSPORTS | FORMULA 1",
-                    homeTeam = "Grand Prix Qualifying",
-                    awayTeam = "Circuit de Monaco",
-                    scoreHome = null,
-                    scoreAway = null,
-                    matchStatus = MatchStatus.UPCOMING,
-                    matchTime = "03:00 PM",
-                    scheduledDate = "17/10/2026",
-                    startsInText = "Starts in 2 days",
-                    isFavorite = false,
-                    streamSources = sampleStreams1,
-                    isDemoData = true,
-                    venue = "Monaco Street Circuit"
+                    venue = "Allianz Arena"
                 )
             )
-            dao.insertMatches(demoMatches)
+            dao.insertMatches(initialDemoFixtures)
         }
 
         val channelsCount = dao.getAllChannels().firstOrNull()?.size ?: 0
@@ -324,41 +159,34 @@ class SportsRepository(private val context: Context) {
                     logoUrl = null,
                     isEnabled = true,
                     streamSources = listOf(
-                        StreamSource("cs1", "Main Stream (HLS)", "https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8", "1080p HD", StreamProtocol.HLS),
-                        StreamSource("cs2", "Alternative SD", "https://cph-p2p-msl.akamaized.net/hls/live/2000341/test/master.m3u8", "720p SD", StreamProtocol.HLS)
+                        StreamSource(
+                            id = "cs1",
+                            label = "Official Main Stream",
+                            url = "https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8",
+                            quality = "1080p HD",
+                            protocol = StreamProtocol.HLS,
+                            isAuthorized = true,
+                            language = "English"
+                        )
                     )
                 ),
                 ChannelEntity(
                     id = "c2",
-                    name = "CricZ 24/7 Live",
-                    sportId = "cricket",
-                    categoryName = "Cricket World",
+                    name = "Matchora Arena 2",
+                    sportId = "football",
+                    categoryName = "Football Live",
                     logoUrl = null,
                     isEnabled = true,
                     streamSources = listOf(
-                        StreamSource("cs3", "Live Arena 1", "https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8", "1080p HD", StreamProtocol.HLS)
-                    )
-                ),
-                ChannelEntity(
-                    id = "c3",
-                    name = "Matchora Fight Night",
-                    sportId = "boxing",
-                    categoryName = "Combat Sports",
-                    logoUrl = null,
-                    isEnabled = true,
-                    streamSources = listOf(
-                        StreamSource("cs4", "Ring Side Feed", "https://cph-p2p-msl.akamaized.net/hls/live/2000341/test/master.m3u8", "1080p HD", StreamProtocol.HLS)
-                    )
-                ),
-                ChannelEntity(
-                    id = "c4",
-                    name = "Speedway Grand Prix TV",
-                    sportId = "motorsports",
-                    categoryName = "Motorsports & Racing",
-                    logoUrl = null,
-                    isEnabled = true,
-                    streamSources = listOf(
-                        StreamSource("cs5", "Track Feed (Legal Demo)", "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4", "720p", StreamProtocol.MP4)
+                        StreamSource(
+                            id = "cs2",
+                            label = "Secondary Feed",
+                            url = "https://cph-p2p-msl.akamaized.net/hls/live/2000341/test/master.m3u8",
+                            quality = "720p SD",
+                            protocol = StreamProtocol.HLS,
+                            isAuthorized = true,
+                            language = "English"
+                        )
                     )
                 )
             )
@@ -390,7 +218,6 @@ class SportsRepository(private val context: Context) {
     fun loginOwner(plainPassword: String): Boolean {
         val storedHash = prefs.getString("owner_pass_hash", null)
         if (storedHash == null) {
-            // First time setup: allow owner to set password
             setOwnerPassword(plainPassword)
             return true
         }
@@ -429,8 +256,76 @@ class SportsRepository(private val context: Context) {
     suspend fun updateMatchScore(id: String, scoreHome: Int?, scoreAway: Int?, time: String, status: MatchStatus) {
         if (!_isAdminAuthenticated.value) throw SecurityException("Unauthorized owner access")
         withContext(Dispatchers.IO) {
-            dao.updateMatchScore(id, scoreHome, scoreAway, time, status)
-            dao.insertAdminLog(AdminLogEntity(action = "SCORE_UPDATE", details = "Match $id updated: $scoreHome - $scoreAway ($time, $status)"))
+            val existing = dao.getMatchById(id)
+            if (existing != null) {
+                val overridden = existing.copy(
+                    scoreHome = scoreHome,
+                    scoreAway = scoreAway,
+                    matchTime = time,
+                    matchStatus = status,
+                    isManuallyOverridden = true,
+                    overriddenFields = "score,status,time",
+                    lastUpdated = System.currentTimeMillis()
+                )
+                dao.updateMatch(overridden)
+            } else {
+                dao.updateMatchScore(id, scoreHome, scoreAway, time, status)
+            }
+            dao.insertAdminLog(AdminLogEntity(action = "MANUAL_OVERRIDE", details = "Match $id manual override: $scoreHome - $scoreAway ($time, $status)"))
+        }
+    }
+
+    suspend fun saveMatchOverride(
+        matchId: String,
+        scoreHome: Int?,
+        scoreAway: Int?,
+        status: MatchStatus,
+        matchTime: String,
+        venue: String? = null
+    ) {
+        if (!_isAdminAuthenticated.value) throw SecurityException("Unauthorized owner access")
+        withContext(Dispatchers.IO) {
+            val existing = dao.getMatchById(matchId) ?: return@withContext
+            val updated = existing.copy(
+                scoreHome = scoreHome,
+                scoreAway = scoreAway,
+                matchStatus = status,
+                matchTime = matchTime,
+                venue = venue ?: existing.venue,
+                isManuallyOverridden = true,
+                overriddenFields = "score,status,time",
+                lastUpdated = System.currentTimeMillis()
+            )
+            dao.updateMatch(updated)
+            dao.insertAdminLog(
+                AdminLogEntity(
+                    action = "MANUAL_OVERRIDE",
+                    details = "Override set for ${existing.homeTeam} vs ${existing.awayTeam}: $scoreHome-$scoreAway, $status"
+                )
+            )
+        }
+    }
+
+    suspend fun restoreProviderMatchValues(matchId: String) {
+        if (!_isAdminAuthenticated.value) throw SecurityException("Unauthorized owner access")
+        withContext(Dispatchers.IO) {
+            val existing = dao.getMatchById(matchId) ?: return@withContext
+            val restored = existing.copy(
+                scoreHome = existing.rawProviderScoreHome ?: existing.scoreHome,
+                scoreAway = existing.rawProviderScoreAway ?: existing.scoreAway,
+                matchStatus = existing.rawProviderStatus ?: existing.matchStatus,
+                matchTime = existing.rawProviderMatchTime ?: existing.matchTime,
+                isManuallyOverridden = false,
+                overriddenFields = "",
+                lastUpdated = System.currentTimeMillis()
+            )
+            dao.updateMatch(restored)
+            dao.insertAdminLog(
+                AdminLogEntity(
+                    action = "RESTORE_PROVIDER",
+                    details = "Restored provider values for ${existing.homeTeam} vs ${existing.awayTeam}"
+                )
+            )
         }
     }
 
@@ -442,6 +337,98 @@ class SportsRepository(private val context: Context) {
         }
     }
 
+    // Match Stream Management
+    suspend fun addOrUpdateMatchStream(matchId: String, stream: StreamSource) {
+        if (!_isAdminAuthenticated.value) throw SecurityException("Unauthorized owner access")
+        withContext(Dispatchers.IO) {
+            val match = dao.getMatchById(matchId) ?: return@withContext
+            val currentStreams = match.streamSources.toMutableList()
+            val existingIndex = currentStreams.indexOfFirst { it.id == stream.id }
+
+            if (existingIndex >= 0) {
+                currentStreams[existingIndex] = stream
+            } else {
+                val newSortOrder = if (stream.sortOrder == 0) currentStreams.size else stream.sortOrder
+                currentStreams.add(stream.copy(sortOrder = newSortOrder))
+            }
+
+            dao.updateMatch(match.copy(streamSources = currentStreams))
+            dao.insertAdminLog(
+                AdminLogEntity(
+                    action = "STREAM_SAVED",
+                    details = "Stream '${stream.label}' saved for match ${match.homeTeam} vs ${match.awayTeam}"
+                )
+            )
+        }
+    }
+
+    suspend fun deleteMatchStream(matchId: String, streamId: String) {
+        if (!_isAdminAuthenticated.value) throw SecurityException("Unauthorized owner access")
+        withContext(Dispatchers.IO) {
+            val match = dao.getMatchById(matchId) ?: return@withContext
+            val updatedStreams = match.streamSources.filterNot { it.id == streamId }
+            dao.updateMatch(match.copy(streamSources = updatedStreams))
+            dao.insertAdminLog(
+                AdminLogEntity(
+                    action = "STREAM_DELETED",
+                    details = "Stream $streamId removed from match ${match.homeTeam} vs ${match.awayTeam}"
+                )
+            )
+        }
+    }
+
+    suspend fun toggleMatchStreamEnabled(matchId: String, streamId: String, isEnabled: Boolean) {
+        if (!_isAdminAuthenticated.value) throw SecurityException("Unauthorized owner access")
+        withContext(Dispatchers.IO) {
+            val match = dao.getMatchById(matchId) ?: return@withContext
+            val updatedStreams = match.streamSources.map {
+                if (it.id == streamId) it.copy(isEnabled = isEnabled) else it
+            }
+            dao.updateMatch(match.copy(streamSources = updatedStreams))
+            dao.insertAdminLog(
+                AdminLogEntity(
+                    action = "STREAM_TOGGLE",
+                    details = "Stream $streamId set to ${if (isEnabled) "enabled" else "disabled"} on ${match.homeTeam} vs ${match.awayTeam}"
+                )
+            )
+        }
+    }
+
+    suspend fun reorderMatchStreams(matchId: String, reorderedStreams: List<StreamSource>) {
+        if (!_isAdminAuthenticated.value) throw SecurityException("Unauthorized owner access")
+        withContext(Dispatchers.IO) {
+            val match = dao.getMatchById(matchId) ?: return@withContext
+            val indexed = reorderedStreams.mapIndexed { index, s -> s.copy(sortOrder = index) }
+            dao.updateMatch(match.copy(streamSources = indexed))
+            dao.insertAdminLog(
+                AdminLogEntity(
+                    action = "STREAM_REORDER",
+                    details = "Reordered ${indexed.size} streams for ${match.homeTeam} vs ${match.awayTeam}"
+                )
+            )
+        }
+    }
+
+    suspend fun assignChannelStreamToMatch(matchId: String, channelStream: StreamSource) {
+        if (!_isAdminAuthenticated.value) throw SecurityException("Unauthorized owner access")
+        withContext(Dispatchers.IO) {
+            val match = dao.getMatchById(matchId) ?: return@withContext
+            val newStream = channelStream.copy(
+                id = "assigned_${UUID.randomUUID().toString().take(8)}",
+                sortOrder = match.streamSources.size
+            )
+            val updated = match.streamSources + newStream
+            dao.updateMatch(match.copy(streamSources = updated))
+            dao.insertAdminLog(
+                AdminLogEntity(
+                    action = "STREAM_ASSIGNED",
+                    details = "Assigned channel stream '${newStream.label}' to ${match.homeTeam} vs ${match.awayTeam}"
+                )
+            )
+        }
+    }
+
+    // Channels CRUD
     suspend fun addOrUpdateChannel(channel: ChannelEntity) {
         if (!_isAdminAuthenticated.value) throw SecurityException("Unauthorized owner access")
         withContext(Dispatchers.IO) {
@@ -458,6 +445,7 @@ class SportsRepository(private val context: Context) {
         }
     }
 
+    // Sports CRUD
     suspend fun addOrUpdateSport(sport: SportCategoryEntity) {
         if (!_isAdminAuthenticated.value) throw SecurityException("Unauthorized owner access")
         withContext(Dispatchers.IO) {
@@ -474,37 +462,148 @@ class SportsRepository(private val context: Context) {
         }
     }
 
+    // System Config
     suspend fun updateSystemConfig(config: SystemConfigEntity) {
         if (!_isAdminAuthenticated.value) throw SecurityException("Unauthorized owner access")
         withContext(Dispatchers.IO) {
             dao.setSystemConfig(config)
-            dao.insertAdminLog(AdminLogEntity(action = "CONFIG_UPDATED", details = "Maintenance: ${config.isMaintenanceMode}, API: ${config.sportsApiProvider}"))
+            dao.insertAdminLog(AdminLogEntity(action = "CONFIG_UPDATED", details = "Provider: ${config.sportsApiProvider}, AutoSync: ${config.autoSyncEnabled}"))
         }
     }
 
-    suspend fun syncSportsApi(): Pair<Boolean, String> {
-        return withContext(Dispatchers.IO) {
-            val currentConfig = dao.getSystemConfig().firstOrNull() ?: SystemConfigEntity()
-            try {
-                // In production, perform live Retrofit/OkHttp sync with currentConfig.sportsApiEndpoint.
-                // If API is temporarily unreachable or offline, we maintain cached data and record timestamp.
+    // Real Match Data Synchronization
+    suspend fun syncSportsApi(): Pair<Boolean, String> = withContext(Dispatchers.IO) {
+        val currentConfig = dao.getSystemConfig().firstOrNull() ?: SystemConfigEntity()
+
+        val provider: SportsMatchProvider = if (currentConfig.sportsApiProvider.contains("API-Football", ignoreCase = true)) {
+            ApiFootballProvider(apiKey = currentConfig.sportsApiKey, baseEndpoint = currentConfig.sportsApiEndpoint)
+        } else {
+            EspnSoccerProvider()
+        }
+
+        val result = provider.fetchLiveAndUpcomingMatches()
+
+        result.fold(
+            onSuccess = { providerMatches ->
+                if (providerMatches.isNotEmpty()) {
+                    for (pMatch in providerMatches) {
+                        val stableId = "espn_${pMatch.id}"
+                        val existing = dao.getMatchById(stableId) ?: dao.getMatchByProviderId(pMatch.id)
+
+                        val scheduledDateStr = DateTimeHelper.formatMatchDate(pMatch.utcTimestamp, currentConfig.displayTimezone)
+                        val startsInStr = DateTimeHelper.formatStartsInText(pMatch.utcTimestamp, pMatch.matchStatus)
+
+                        val matchToInsert = if (existing != null) {
+                            if (existing.isManuallyOverridden) {
+                                // Preserve admin overrides, update underlying raw provider values
+                                existing.copy(
+                                    rawProviderScoreHome = pMatch.scoreHome,
+                                    rawProviderScoreAway = pMatch.scoreAway,
+                                    rawProviderStatus = pMatch.matchStatus,
+                                    rawProviderMatchTime = pMatch.clockText,
+                                    competition = pMatch.competition,
+                                    homeTeam = pMatch.homeTeam,
+                                    homeLogoUrl = pMatch.homeLogoUrl ?: existing.homeLogoUrl,
+                                    awayTeam = pMatch.awayTeam,
+                                    awayLogoUrl = pMatch.awayLogoUrl ?: existing.awayLogoUrl,
+                                    utcTimestamp = pMatch.utcTimestamp,
+                                    scheduledDate = scheduledDateStr,
+                                    venue = pMatch.venue ?: existing.venue,
+                                    isDemoData = false,
+                                    lastUpdated = System.currentTimeMillis()
+                                )
+                            } else {
+                                // Update with latest live provider scores and time
+                                existing.copy(
+                                    competition = pMatch.competition,
+                                    homeTeam = pMatch.homeTeam,
+                                    homeLogoUrl = pMatch.homeLogoUrl ?: existing.homeLogoUrl,
+                                    awayTeam = pMatch.awayTeam,
+                                    awayLogoUrl = pMatch.awayLogoUrl ?: existing.awayLogoUrl,
+                                    scoreHome = pMatch.scoreHome,
+                                    scoreAway = pMatch.scoreAway,
+                                    matchStatus = pMatch.matchStatus,
+                                    matchTime = pMatch.clockText,
+                                    rawProviderScoreHome = pMatch.scoreHome,
+                                    rawProviderScoreAway = pMatch.scoreAway,
+                                    rawProviderStatus = pMatch.matchStatus,
+                                    rawProviderMatchTime = pMatch.clockText,
+                                    utcTimestamp = pMatch.utcTimestamp,
+                                    scheduledDate = scheduledDateStr,
+                                    startsInText = startsInStr,
+                                    venue = pMatch.venue ?: existing.venue,
+                                    isDemoData = false,
+                                    lastUpdated = System.currentTimeMillis()
+                                )
+                            }
+                        } else {
+                            // New match from provider
+                            MatchEntity(
+                                id = stableId,
+                                providerMatchId = pMatch.id,
+                                providerName = provider.providerId,
+                                sportId = pMatch.sportId,
+                                sportName = pMatch.sportName,
+                                competition = pMatch.competition,
+                                homeTeam = pMatch.homeTeam,
+                                homeLogoUrl = pMatch.homeLogoUrl,
+                                awayTeam = pMatch.awayTeam,
+                                awayLogoUrl = pMatch.awayLogoUrl,
+                                scoreHome = pMatch.scoreHome,
+                                scoreAway = pMatch.scoreAway,
+                                matchStatus = pMatch.matchStatus,
+                                matchTime = pMatch.clockText,
+                                rawProviderScoreHome = pMatch.scoreHome,
+                                rawProviderScoreAway = pMatch.scoreAway,
+                                rawProviderStatus = pMatch.matchStatus,
+                                rawProviderMatchTime = pMatch.clockText,
+                                utcTimestamp = pMatch.utcTimestamp,
+                                scheduledDate = scheduledDateStr,
+                                startsInText = startsInStr,
+                                isFavorite = false,
+                                streamSources = emptyList(), // Admin assigns authorized streams
+                                isDemoData = false,
+                                venue = pMatch.venue,
+                                lastUpdated = System.currentTimeMillis()
+                            )
+                        }
+                        dao.insertMatch(matchToInsert)
+                    }
+                }
+
                 val updatedConfig = currentConfig.copy(
                     lastSyncTimestamp = System.currentTimeMillis(),
                     lastSyncStatus = "SUCCESS",
-                    isUsingDemoData = currentConfig.sportsApiKey.isBlank() // if no key provided, mark as demo data
+                    lastSyncMessage = "Synced ${providerMatches.size} fixtures from ${provider.displayName}",
+                    lastSyncErrorDetails = null,
+                    isUsingDemoData = false
                 )
                 dao.setSystemConfig(updatedConfig)
-                dao.insertAdminLog(AdminLogEntity(action = "API_SYNC", details = "Sync completed via ${currentConfig.sportsApiProvider}"))
-                Pair(true, "Data synced successfully. ${if (updatedConfig.isUsingDemoData) "Displaying verified demo fixtures" else "Live fixtures updated"}")
-            } catch (e: Exception) {
+                dao.insertAdminLog(
+                    AdminLogEntity(
+                        action = "API_SYNC_SUCCESS",
+                        details = "Synced ${providerMatches.size} live and upcoming fixtures from ${provider.displayName}"
+                    )
+                )
+
+                Pair(true, "Successfully synced ${providerMatches.size} fixtures from ${provider.displayName}")
+            },
+            onFailure = { error ->
+                val safeErrorMessage = error.message?.take(100) ?: "Sync failed"
                 val errorConfig = currentConfig.copy(
                     lastSyncTimestamp = System.currentTimeMillis(),
-                    lastSyncStatus = "ERROR"
+                    lastSyncStatus = "ERROR",
+                    lastSyncErrorDetails = safeErrorMessage
                 )
                 dao.setSystemConfig(errorConfig)
-                dao.insertAdminLog(AdminLogEntity(action = "API_SYNC_ERROR", details = "Sync failed: ${e.message}"))
-                Pair(false, "Sync failed: ${e.localizedMessage}. Using cached fixtures.")
+                dao.insertAdminLog(
+                    AdminLogEntity(
+                        action = "API_SYNC_ERROR",
+                        details = "Sync failed (${provider.providerId}): $safeErrorMessage"
+                    )
+                )
+                Pair(false, safeErrorMessage)
             }
-        }
+        )
     }
 }

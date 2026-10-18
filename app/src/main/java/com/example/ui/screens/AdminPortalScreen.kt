@@ -25,6 +25,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -39,6 +40,9 @@ import com.example.util.HealthStatus
 import com.example.util.ImageStorageHelper
 import com.example.util.StreamHealthChecker
 import com.example.util.StreamHealthInfo
+import com.example.ui.screens.admin.ManualOverrideDialog
+import com.example.ui.screens.admin.MatchStreamsManagementScreen
+import com.example.util.DateTimeHelper
 import java.text.SimpleDateFormat
 import java.util.*
 import kotlinx.coroutines.launch
@@ -68,6 +72,13 @@ fun AdminPortalScreen(
     onSaveMatch: (MatchEntity) -> Unit,
     onDeleteMatch: (MatchEntity) -> Unit,
     onUpdateMatchScore: (String, Int?, Int?, String, MatchStatus) -> Unit,
+    onSaveMatchOverride: (String, Int?, Int?, MatchStatus, String, String?) -> Unit = { _, _, _, _, _, _ -> },
+    onRestoreProviderValues: (String) -> Unit = {},
+    onAddOrUpdateMatchStream: (String, StreamSource) -> Unit = { _, _ -> },
+    onDeleteMatchStream: (String, String) -> Unit = { _, _ -> },
+    onToggleMatchStreamEnabled: (String, String, Boolean) -> Unit = { _, _, _ -> },
+    onReorderMatchStreams: (String, List<StreamSource>) -> Unit = { _, _ -> },
+    onAssignChannelStreamToMatch: (String, StreamSource) -> Unit = { _, _ -> },
     onSaveChannel: (ChannelEntity) -> Unit,
     onDeleteChannel: (ChannelEntity) -> Unit,
     onSaveSport: (SportCategoryEntity) -> Unit,
@@ -82,6 +93,8 @@ fun AdminPortalScreen(
     // Dialog States
     var showAddMatchDialog by remember { mutableStateOf(false) }
     var matchToEditScore by remember { mutableStateOf<MatchEntity?>(null) }
+    var matchForStreamManagement by remember { mutableStateOf<MatchEntity?>(null) }
+    var matchToOverride by remember { mutableStateOf<MatchEntity?>(null) }
     var itemToDeleteConfirm by remember { mutableStateOf<Pair<String, () -> Unit>?>(null) }
     var showAddChannelDialog by remember { mutableStateOf(false) }
     var channelToEdit by remember { mutableStateOf<ChannelEntity?>(null) }
@@ -89,7 +102,11 @@ fun AdminPortalScreen(
     var showAddSportDialog by remember { mutableStateOf(false) }
 
     BackHandler {
-        onClose()
+        if (matchForStreamManagement != null) {
+            matchForStreamManagement = null
+        } else {
+            onClose()
+        }
     }
 
     if (!isAdminAuthenticated) {
@@ -214,16 +231,32 @@ fun AdminPortalScreen(
         ) {
             when (currentTab) {
                 AdminTab.MATCHES -> {
-                    AdminMatchesTab(
-                        matches = matches,
-                        onAddNew = { showAddMatchDialog = true },
-                        onEditScore = { matchToEditScore = it },
-                        onDelete = { match ->
-                            itemToDeleteConfirm = Pair("match '${match.homeTeam} vs ${match.awayTeam}'") {
-                                onDeleteMatch(match)
+                    if (matchForStreamManagement != null) {
+                        val currentMatch = matches.find { it.id == matchForStreamManagement?.id } ?: matchForStreamManagement!!
+                        MatchStreamsManagementScreen(
+                            match = currentMatch,
+                            channels = channels,
+                            onBack = { matchForStreamManagement = null },
+                            onAddOrUpdateStream = { stream -> onAddOrUpdateMatchStream(currentMatch.id, stream) },
+                            onDeleteStream = { streamId -> onDeleteMatchStream(currentMatch.id, streamId) },
+                            onToggleStreamEnabled = { streamId, enabled -> onToggleMatchStreamEnabled(currentMatch.id, streamId, enabled) },
+                            onReorderStreams = { reordered -> onReorderMatchStreams(currentMatch.id, reordered) },
+                            onAssignChannelStream = { chStream -> onAssignChannelStreamToMatch(currentMatch.id, chStream) }
+                        )
+                    } else {
+                        AdminMatchesTab(
+                            matches = matches,
+                            onAddNew = { showAddMatchDialog = true },
+                            onManageStreams = { matchForStreamManagement = it },
+                            onEditOverride = { matchToOverride = it },
+                            onRestoreProvider = { match -> onRestoreProviderValues(match.id) },
+                            onDelete = { match ->
+                                itemToDeleteConfirm = Pair("match '${match.homeTeam} vs ${match.awayTeam}'") {
+                                    onDeleteMatch(match)
+                                }
                             }
-                        }
-                    )
+                        )
+                    }
                 }
                 AdminTab.CHANNELS -> {
                     AdminChannelsTab(
@@ -325,6 +358,22 @@ fun AdminPortalScreen(
             onSave = { home, away, time, status ->
                 onUpdateMatchScore(match.id, home, away, time, status)
                 matchToEditScore = null
+            }
+        )
+    }
+
+    // 3b. Manual Match Override Dialog
+    matchToOverride?.let { match ->
+        ManualOverrideDialog(
+            match = match,
+            onDismiss = { matchToOverride = null },
+            onSaveOverride = { home, away, status, time, venue ->
+                onSaveMatchOverride(match.id, home, away, status, time, venue)
+                matchToOverride = null
+            },
+            onRestoreProviderValues = {
+                onRestoreProviderValues(match.id)
+                matchToOverride = null
             }
         )
     }
@@ -548,7 +597,9 @@ private fun OwnerAuthView(
 private fun AdminMatchesTab(
     matches: List<MatchEntity>,
     onAddNew: () -> Unit,
-    onEditScore: (MatchEntity) -> Unit,
+    onManageStreams: (MatchEntity) -> Unit,
+    onEditOverride: (MatchEntity) -> Unit,
+    onRestoreProvider: (MatchEntity) -> Unit,
     onDelete: (MatchEntity) -> Unit
 ) {
     LazyColumn(
@@ -582,6 +633,7 @@ private fun AdminMatchesTab(
         }
 
         items(matches, key = { it.id }) { match ->
+            val enabledStreamsCount = match.streamSources.count { it.isEnabled }
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 colors = CardDefaults.cardColors(containerColor = NavyCard),
@@ -600,28 +652,51 @@ private fun AdminMatchesTab(
                             fontWeight = FontWeight.Bold,
                             color = TurquoiseSecondary
                         )
-                        Box(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(4.dp))
-                                .background(
-                                    when (match.matchStatus) {
-                                        MatchStatus.LIVE -> NeonLiveRed.copy(alpha = 0.2f)
-                                        MatchStatus.UPCOMING -> TurquoisePrimary.copy(alpha = 0.2f)
-                                        MatchStatus.FINISHED -> Color.Gray.copy(alpha = 0.2f)
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            if (match.isManuallyOverridden) {
+                                Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(4.dp))
+                                        .background(Color(0xFFF59E0B).copy(alpha = 0.2f))
+                                        .padding(horizontal = 6.dp, vertical = 2.dp)
+                                ) {
+                                    Text(
+                                        text = "OVERRIDDEN",
+                                        fontSize = 9.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color(0xFFF59E0B)
+                                    )
+                                }
+                            }
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(4.dp))
+                                    .background(
+                                        when (match.matchStatus) {
+                                            MatchStatus.LIVE -> NeonLiveRed.copy(alpha = 0.2f)
+                                            MatchStatus.HALFTIME -> Color(0xFFF59E0B).copy(alpha = 0.2f)
+                                            MatchStatus.UPCOMING -> TurquoisePrimary.copy(alpha = 0.2f)
+                                            MatchStatus.FINISHED -> Color.Gray.copy(alpha = 0.2f)
+                                            MatchStatus.POSTPONED -> Color(0xFFEAB308).copy(alpha = 0.2f)
+                                            MatchStatus.CANCELLED -> Color.Red.copy(alpha = 0.2f)
+                                        }
+                                    )
+                                    .padding(horizontal = 6.dp, vertical = 2.dp)
+                            ) {
+                                Text(
+                                    text = match.matchStatus.name,
+                                    fontSize = 9.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = when (match.matchStatus) {
+                                        MatchStatus.LIVE -> NeonLiveRed
+                                        MatchStatus.HALFTIME -> Color(0xFFF59E0B)
+                                        MatchStatus.UPCOMING -> TurquoisePrimary
+                                        MatchStatus.FINISHED -> Color.LightGray
+                                        MatchStatus.POSTPONED -> Color(0xFFEAB308)
+                                        MatchStatus.CANCELLED -> Color.Red
                                     }
                                 )
-                                .padding(horizontal = 6.dp, vertical = 2.dp)
-                        ) {
-                            Text(
-                                text = match.matchStatus.name,
-                                fontSize = 9.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = when (match.matchStatus) {
-                                    MatchStatus.LIVE -> NeonLiveRed
-                                    MatchStatus.UPCOMING -> TurquoisePrimary
-                                    MatchStatus.FINISHED -> Color.LightGray
-                                }
-                            )
+                            }
                         }
                     }
 
@@ -632,7 +707,7 @@ private fun AdminMatchesTab(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Column {
+                        Column(modifier = Modifier.weight(1f)) {
                             Text(
                                 text = "${match.homeTeam} vs ${match.awayTeam}",
                                 fontSize = 14.sp,
@@ -640,7 +715,7 @@ private fun AdminMatchesTab(
                                 color = Color.White
                             )
                             Text(
-                                text = "${match.scheduledDate} • ${match.matchTime} • ${match.streamSources.size} Streams",
+                                text = "${match.scheduledDate} • ${match.matchTime} • $enabledStreamsCount/${match.streamSources.size} Streams Active",
                                 fontSize = 11.sp,
                                 color = TextSecondary
                             )
@@ -658,29 +733,64 @@ private fun AdminMatchesTab(
 
                     Spacer(modifier = Modifier.height(10.dp))
 
+                    // Match Action Buttons
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.End,
+                        horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
+                        // Streams button
                         OutlinedButton(
-                            onClick = { onEditScore(match) },
+                            onClick = { onManageStreams(match) },
                             shape = RoundedCornerShape(8.dp),
                             modifier = Modifier.height(32.dp),
-                            border = androidx.compose.foundation.BorderStroke(1.dp, TurquoisePrimary)
+                            border = androidx.compose.foundation.BorderStroke(1.dp, TurquoisePrimary),
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp)
                         ) {
-                            Icon(Icons.Default.Edit, contentDescription = null, tint = TurquoisePrimary, modifier = Modifier.size(14.dp))
+                            Icon(Icons.Default.Sensors, contentDescription = null, tint = TurquoisePrimary, modifier = Modifier.size(14.dp))
                             Spacer(modifier = Modifier.width(4.dp))
-                            Text("Edit / Score", fontSize = 11.sp, color = TurquoisePrimary)
+                            Text("Streams ($enabledStreamsCount)", fontSize = 11.sp, color = TurquoisePrimary, fontWeight = FontWeight.SemiBold)
                         }
 
-                        Spacer(modifier = Modifier.width(8.dp))
-
-                        IconButton(
-                            onClick = { onDelete(match) },
-                            modifier = Modifier.size(32.dp)
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
-                            Icon(Icons.Default.Delete, contentDescription = "Delete", tint = NeonLiveRed, modifier = Modifier.size(18.dp))
+                            // Override / Edit button
+                            OutlinedButton(
+                                onClick = { onEditOverride(match) },
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier.height(32.dp),
+                                border = androidx.compose.foundation.BorderStroke(1.dp, if (match.isManuallyOverridden) Color(0xFFF59E0B) else NavyBorder),
+                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                            ) {
+                                Icon(Icons.Default.Edit, contentDescription = null, tint = if (match.isManuallyOverridden) Color(0xFFF59E0B) else TextSecondary, modifier = Modifier.size(13.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("Override", fontSize = 11.sp, color = if (match.isManuallyOverridden) Color(0xFFF59E0B) else TextSecondary)
+                            }
+
+                            // Restore Provider button if overridden
+                            if (match.isManuallyOverridden) {
+                                OutlinedButton(
+                                    onClick = { onRestoreProvider(match) },
+                                    shape = RoundedCornerShape(8.dp),
+                                    modifier = Modifier.height(32.dp),
+                                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF10B981)),
+                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                                ) {
+                                    Icon(Icons.Default.Restore, contentDescription = null, tint = Color(0xFF10B981), modifier = Modifier.size(13.dp))
+                                    Spacer(modifier = Modifier.width(3.dp))
+                                    Text("Restore", fontSize = 11.sp, color = Color(0xFF10B981))
+                                }
+                            }
+
+                            // Delete button
+                            IconButton(
+                                onClick = { onDelete(match) },
+                                modifier = Modifier.size(32.dp)
+                            ) {
+                                Icon(Icons.Default.Delete, contentDescription = "Delete", tint = NeonLiveRed, modifier = Modifier.size(18.dp))
+                            }
                         }
                     }
                 }
@@ -1239,14 +1349,117 @@ private fun AdminApiSyncTab(
     var provider by remember(config) { mutableStateOf(config.sportsApiProvider) }
     var endpoint by remember(config) { mutableStateOf(config.sportsApiEndpoint) }
     var apiKey by remember(config) { mutableStateOf(config.sportsApiKey) }
-    var syncInterval by remember(config) { mutableIntStateOf(config.autoSyncIntervalMinutes) }
+    var autoSyncEnabled by remember(config) { mutableStateOf(config.autoSyncEnabled) }
+    var liveIntervalSec by remember(config) { mutableIntStateOf(config.liveRefreshIntervalSeconds) }
+    var scheduleIntervalMin by remember(config) { mutableIntStateOf(config.scheduleRefreshIntervalMinutes) }
     var isUsingDemo by remember(config) { mutableStateOf(config.isUsingDemoData) }
+    var showApiKey by remember { mutableStateOf(false) }
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
+        // Current Sync Status Card
+        item {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = NavyCard),
+                shape = RoundedCornerShape(16.dp),
+                border = androidx.compose.foundation.BorderStroke(
+                    1.dp,
+                    when (config.lastSyncStatus) {
+                        "SUCCESS" -> Color(0xFF10B981).copy(alpha = 0.5f)
+                        "ERROR" -> NeonLiveRed.copy(alpha = 0.5f)
+                        else -> NavyBorder
+                    }
+                )
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = when (config.lastSyncStatus) {
+                                    "SUCCESS" -> Icons.Default.CheckCircle
+                                    "ERROR" -> Icons.Default.ErrorOutline
+                                    else -> Icons.Default.CloudQueue
+                                },
+                                contentDescription = null,
+                                tint = when (config.lastSyncStatus) {
+                                    "SUCCESS" -> Color(0xFF10B981)
+                                    "ERROR" -> NeonLiveRed
+                                    else -> TextSecondary
+                                },
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = "SYNC STATUS: ${config.lastSyncStatus}",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = when (config.lastSyncStatus) {
+                                    "SUCCESS" -> Color(0xFF10B981)
+                                    "ERROR" -> NeonLiveRed
+                                    else -> TextSecondary
+                                }
+                            )
+                        }
+
+                        Button(
+                            onClick = onTriggerSync,
+                            colors = ButtonDefaults.buttonColors(containerColor = TurquoisePrimary),
+                            shape = RoundedCornerShape(8.dp),
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
+                            modifier = Modifier.height(30.dp)
+                        ) {
+                            Icon(Icons.Default.Sync, contentDescription = null, tint = NavyBackground, modifier = Modifier.size(14.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Sync Now", color = NavyBackground, fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    if (config.lastSyncTimestamp != null && config.lastSyncTimestamp > 0) {
+                        Text(
+                            text = "Last Synced: ${DateTimeHelper.formatLastUpdated(config.lastSyncTimestamp, config.displayTimezone)}",
+                            fontSize = 11.sp,
+                            color = TextSecondary
+                        )
+                    } else {
+                        Text(
+                            text = "Last Synced: Never",
+                            fontSize = 11.sp,
+                            color = TextMuted
+                        )
+                    }
+
+                    if (config.lastSyncMessage.isNotBlank()) {
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = config.lastSyncMessage,
+                            fontSize = 12.sp,
+                            color = Color.White
+                        )
+                    }
+
+                    if (config.lastSyncStatus == "ERROR" && !config.lastSyncErrorDetails.isNullOrBlank()) {
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = "Error: ${config.lastSyncErrorDetails}",
+                            fontSize = 11.sp,
+                            color = NeonLiveRed
+                        )
+                    }
+                }
+            }
+        }
+
+        // Provider Configuration Card
         item {
             Card(
                 modifier = Modifier.fillMaxWidth(),
@@ -1255,11 +1468,36 @@ private fun AdminApiSyncTab(
             ) {
                 Column(modifier = Modifier.padding(16.dp)) {
                     Text(
-                        text = "AUTHORIZED SPORTS DATA API",
+                        text = "DATA PROVIDER & ADAPTER",
                         fontSize = 12.sp,
                         fontWeight = FontWeight.Bold,
                         color = TurquoiseSecondary
                     )
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    // Preset Chips
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        FilterChip(
+                            selected = provider.contains("ESPN", ignoreCase = true),
+                            onClick = {
+                                provider = "ESPN Soccer Scoreboard"
+                                endpoint = "https://site.api.espn.com/apis/site/v2/sports/soccer/"
+                            },
+                            label = { Text("ESPN Public (Free)", fontSize = 11.sp) }
+                        )
+                        FilterChip(
+                            selected = provider.contains("API-Football", ignoreCase = true),
+                            onClick = {
+                                provider = "API-Football"
+                                endpoint = "https://v3.football.api-sports.io"
+                            },
+                            label = { Text("API-Football (Key Req.)", fontSize = 11.sp) }
+                        )
+                    }
 
                     Spacer(modifier = Modifier.height(10.dp))
 
@@ -1296,8 +1534,17 @@ private fun AdminApiSyncTab(
                     OutlinedTextField(
                         value = apiKey,
                         onValueChange = { apiKey = it },
-                        label = { Text("Authorized API Key / Token") },
-                        visualTransformation = PasswordVisualTransformation(),
+                        label = { Text("API Key / Secret Token") },
+                        visualTransformation = if (showApiKey) VisualTransformation.None else PasswordVisualTransformation(),
+                        trailingIcon = {
+                            IconButton(onClick = { showApiKey = !showApiKey }) {
+                                Icon(
+                                    imageVector = if (showApiKey) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                                    contentDescription = "Toggle Key Visibility",
+                                    tint = TextSecondary
+                                )
+                            }
+                        },
                         modifier = Modifier.fillMaxWidth(),
                         colors = OutlinedTextFieldDefaults.colors(
                             focusedBorderColor = TurquoisePrimary,
@@ -1309,23 +1556,78 @@ private fun AdminApiSyncTab(
 
                     Spacer(modifier = Modifier.height(14.dp))
 
+                    // Auto sync toggle
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column {
+                            Text(
+                                text = "Automatic Background Sync",
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = Color.White
+                            )
+                            Text(
+                                text = if (autoSyncEnabled) "Active: Polling when app active" else "Paused: Manual sync only",
+                                fontSize = 11.sp,
+                                color = if (autoSyncEnabled) Color(0xFF10B981) else TextMuted
+                            )
+                        }
+                        Switch(
+                            checked = autoSyncEnabled,
+                            onCheckedChange = { autoSyncEnabled = it },
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = TurquoisePrimary,
+                                checkedTrackColor = NavyCardElevated
+                            )
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(14.dp))
+
+                    // Live match refresh interval
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            text = "Auto-Sync Interval: ${syncInterval}m",
-                            fontSize = 13.sp,
+                            text = "Live Match Interval: ${liveIntervalSec}s",
+                            fontSize = 12.sp,
                             color = Color.White
                         )
-                        Row {
-                            listOf(15, 30, 60).forEach { mins ->
+                        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                            listOf(15, 30, 60).forEach { sec ->
                                 FilterChip(
-                                    selected = syncInterval == mins,
-                                    onClick = { syncInterval = mins },
-                                    label = { Text("${mins}m", fontSize = 11.sp) },
-                                    modifier = Modifier.padding(horizontal = 2.dp)
+                                    selected = liveIntervalSec == sec,
+                                    onClick = { liveIntervalSec = sec },
+                                    label = { Text("${sec}s", fontSize = 10.sp) }
+                                )
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    // Schedule / upcoming refresh interval
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "Schedule Interval: ${scheduleIntervalMin}m",
+                            fontSize = 12.sp,
+                            color = Color.White
+                        )
+                        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                            listOf(5, 10, 15).forEach { min ->
+                                FilterChip(
+                                    selected = scheduleIntervalMin == min,
+                                    onClick = { scheduleIntervalMin = min },
+                                    label = { Text("${min}m", fontSize = 10.sp) }
                                 )
                             }
                         }
@@ -1339,7 +1641,7 @@ private fun AdminApiSyncTab(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            text = "Force Demo Data Mode",
+                            text = "Demo Mode (Mock data fallback)",
                             fontSize = 13.sp,
                             color = Color.White
                         )
@@ -1351,37 +1653,24 @@ private fun AdminApiSyncTab(
 
                     Spacer(modifier = Modifier.height(18.dp))
 
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        Button(
-                            onClick = {
-                                onSaveConfig(
-                                    config.copy(
-                                        sportsApiProvider = provider,
-                                        sportsApiEndpoint = endpoint,
-                                        sportsApiKey = apiKey,
-                                        autoSyncIntervalMinutes = syncInterval,
-                                        isUsingDemoData = isUsingDemo
-                                    )
+                    Button(
+                        onClick = {
+                            onSaveConfig(
+                                config.copy(
+                                    sportsApiProvider = provider,
+                                    sportsApiEndpoint = endpoint,
+                                    sportsApiKey = apiKey,
+                                    autoSyncEnabled = autoSyncEnabled,
+                                    liveRefreshIntervalSeconds = liveIntervalSec,
+                                    scheduleRefreshIntervalMinutes = scheduleIntervalMin,
+                                    isUsingDemoData = isUsingDemo
                                 )
-                            },
-                            colors = ButtonDefaults.buttonColors(containerColor = TurquoisePrimary),
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Text("Save API Settings", color = NavyBackground, fontWeight = FontWeight.Bold)
-                        }
-
-                        Button(
-                            onClick = onTriggerSync,
-                            colors = ButtonDefaults.buttonColors(containerColor = NavyCardElevated),
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Icon(Icons.Default.Sync, contentDescription = null, tint = TurquoisePrimary, modifier = Modifier.size(16.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text("Sync Now", color = Color.White)
-                        }
+                            )
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = TurquoisePrimary),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("Save Sync & API Settings", color = NavyBackground, fontWeight = FontWeight.Bold)
                     }
                 }
             }

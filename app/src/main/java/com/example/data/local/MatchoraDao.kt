@@ -8,17 +8,20 @@ import kotlinx.coroutines.flow.Flow
 interface MatchoraDao {
 
     // Matches
-    @Query("SELECT * FROM matches ORDER BY CASE matchStatus WHEN 'LIVE' THEN 1 WHEN 'UPCOMING' THEN 2 ELSE 3 END, scheduledDate ASC")
+    @Query("SELECT * FROM matches ORDER BY CASE matchStatus WHEN 'LIVE' THEN 1 WHEN 'HALFTIME' THEN 2 WHEN 'UPCOMING' THEN 3 WHEN 'FINISHED' THEN 4 ELSE 5 END, CASE WHEN utcTimestamp > 0 THEN utcTimestamp ELSE 9999999999999 END ASC, scheduledDate ASC")
     fun getAllMatches(): Flow<List<MatchEntity>>
 
-    @Query("SELECT * FROM matches WHERE isFavorite = 1")
+    @Query("SELECT * FROM matches WHERE isFavorite = 1 ORDER BY CASE matchStatus WHEN 'LIVE' THEN 1 WHEN 'HALFTIME' THEN 2 WHEN 'UPCOMING' THEN 3 ELSE 4 END")
     fun getFavoriteMatches(): Flow<List<MatchEntity>>
 
-    @Query("SELECT * FROM matches WHERE matchStatus = 'LIVE'")
+    @Query("SELECT * FROM matches WHERE matchStatus IN ('LIVE', 'HALFTIME') ORDER BY matchTime ASC")
     fun getLiveMatches(): Flow<List<MatchEntity>>
 
     @Query("SELECT * FROM matches WHERE id = :id")
     suspend fun getMatchById(id: String): MatchEntity?
+
+    @Query("SELECT * FROM matches WHERE providerMatchId = :providerId LIMIT 1")
+    suspend fun getMatchByProviderId(providerId: String): MatchEntity?
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertMatches(matches: List<MatchEntity>)

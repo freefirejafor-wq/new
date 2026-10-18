@@ -9,14 +9,18 @@ import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
 
 enum class MatchStatus {
     LIVE,
+    HALFTIME,
     UPCOMING,
-    FINISHED
+    FINISHED,
+    POSTPONED,
+    CANCELLED
 }
 
 enum class StreamProtocol {
     HLS,
     DASH,
-    MP4
+    MP4,
+    EMBED
 }
 
 data class StreamSource(
@@ -25,13 +29,22 @@ data class StreamSource(
     val url: String,
     val quality: String = "1080p HD",
     val protocol: StreamProtocol = StreamProtocol.HLS,
-    val isAuthorized: Boolean = true,
-    val isBackup: Boolean = false
+    val isAuthorized: Boolean = false, // True only when explicitly verified by an admin
+    val isBackup: Boolean = false,     // Fallback stream designation
+    val isEnabled: Boolean = true,
+    val sortOrder: Int = 0,
+    val language: String = "English",
+    val region: String = "Global",
+    val verificationNote: String? = null,
+    val lastCheckedTime: Long? = null,
+    val healthStatus: String? = null
 )
 
 @Entity(tableName = "matches")
 data class MatchEntity(
     @PrimaryKey val id: String,
+    val providerMatchId: String? = null,
+    val providerName: String? = null,
     val sportId: String,
     val sportName: String,
     val competition: String,
@@ -43,13 +56,21 @@ data class MatchEntity(
     val scoreAway: Int? = null,
     val matchStatus: MatchStatus,
     val matchTime: String,
+    val utcTimestamp: Long = 0L,
     val scheduledDate: String,
     val startsInText: String? = null,
     val isFavorite: Boolean = false,
     val streamSources: List<StreamSource> = emptyList(),
-    val isDemoData: Boolean = true,
+    val isDemoData: Boolean = false,
     val venue: String? = null,
-    val lastUpdated: Long = System.currentTimeMillis()
+    val lastUpdated: Long = System.currentTimeMillis(),
+    // Explicit manual overrides:
+    val isManuallyOverridden: Boolean = false,
+    val overriddenFields: String = "",
+    val rawProviderScoreHome: Int? = null,
+    val rawProviderScoreAway: Int? = null,
+    val rawProviderStatus: MatchStatus? = null,
+    val rawProviderMatchTime: String? = null
 )
 
 @Entity(tableName = "channels")
@@ -85,13 +106,19 @@ data class SystemConfigEntity(
     @PrimaryKey val id: Int = 1,
     val isMaintenanceMode: Boolean = false,
     val maintenanceMessage: String = "Matchora is currently undergoing maintenance. Live match tracking will resume shortly.",
-    val sportsApiProvider: String = "TheSportsDB / Football-Data API",
-    val sportsApiEndpoint: String = "https://api.football-data.org/v4/matches",
+    val sportsApiProvider: String = "ESPN Soccer Scoreboard",
+    val sportsApiEndpoint: String = "https://site.api.espn.com/apis/site/v2/sports/soccer/",
     val sportsApiKey: String = "",
-    val autoSyncIntervalMinutes: Int = 30,
+    val autoSyncEnabled: Boolean = true,
+    val autoSyncIntervalMinutes: Int = 5,
+    val liveRefreshIntervalSeconds: Int = 30,
+    val scheduleRefreshIntervalMinutes: Int = 10,
     val lastSyncTimestamp: Long? = null,
     val lastSyncStatus: String = "NEVER", // SUCCESS, ERROR, NEVER
-    val isUsingDemoData: Boolean = true
+    val lastSyncMessage: String = "",
+    val lastSyncErrorDetails: String? = null,
+    val displayTimezone: String = "Asia/Dhaka",
+    val isUsingDemoData: Boolean = false
 )
 
 class DatabaseConverters {
@@ -123,6 +150,18 @@ class DatabaseConverters {
             MatchStatus.valueOf(value)
         } catch (e: Exception) {
             MatchStatus.UPCOMING
+        }
+    }
+
+    @TypeConverter
+    fun fromStreamProtocol(protocol: StreamProtocol): String = protocol.name
+
+    @TypeConverter
+    fun toStreamProtocol(value: String): StreamProtocol {
+        return try {
+            StreamProtocol.valueOf(value)
+        } catch (e: Exception) {
+            StreamProtocol.HLS
         }
     }
 }

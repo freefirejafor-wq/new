@@ -187,6 +187,38 @@ fun MatchCard(
                             )
                         }
 
+                        MatchStatus.HALFTIME -> {
+                            // Orange Half Time Badge
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(4.dp))
+                                    .background(Color(0xFFF59E0B).copy(alpha = 0.2f))
+                                    .padding(horizontal = 6.dp, vertical = 2.dp)
+                            ) {
+                                Text(
+                                    text = "Half Time",
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color(0xFFF59E0B)
+                                )
+                            }
+
+                            Text(
+                                text = "${match.scoreHome ?: 0} - ${match.scoreAway ?: 0}",
+                                fontSize = 18.sp,
+                                fontWeight = FontWeight.ExtraBold,
+                                color = TurquoisePrimary,
+                                letterSpacing = 1.sp
+                            )
+
+                            Text(
+                                text = "HT",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = TextSecondary
+                            )
+                        }
+
                         MatchStatus.UPCOMING -> {
                             Text(
                                 text = match.matchTime,
@@ -224,6 +256,48 @@ fun MatchCard(
                                 fontWeight = FontWeight.Medium
                             )
                         }
+
+                        MatchStatus.POSTPONED -> {
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(4.dp))
+                                    .background(Color(0xFFEAB308).copy(alpha = 0.15f))
+                                    .padding(horizontal = 6.dp, vertical = 2.dp)
+                            ) {
+                                Text(
+                                    text = "Postponed",
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color(0xFFEAB308)
+                                )
+                            }
+                            Text(
+                                text = match.scheduledDate,
+                                fontSize = 10.sp,
+                                color = TextMuted
+                            )
+                        }
+
+                        MatchStatus.CANCELLED -> {
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(4.dp))
+                                    .background(Color.Red.copy(alpha = 0.15f))
+                                    .padding(horizontal = 6.dp, vertical = 2.dp)
+                            ) {
+                                Text(
+                                    text = "Cancelled",
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color.Red
+                                )
+                            }
+                            Text(
+                                text = match.scheduledDate,
+                                fontSize = 10.sp,
+                                color = TextMuted
+                            )
+                        }
                     }
                 }
 
@@ -248,14 +322,15 @@ fun MatchCard(
             }
 
             // Stream sources badge indicator at bottom
-            if (match.streamSources.isNotEmpty()) {
-                Spacer(modifier = Modifier.height(10.dp))
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
+            val enabledStreamsCount = match.streamSources.count { it.isEnabled }
+            Spacer(modifier = Modifier.height(10.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (enabledStreamsCount > 0) {
                         Box(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(6.dp))
@@ -272,29 +347,52 @@ fun MatchCard(
                                 )
                                 Spacer(modifier = Modifier.width(3.dp))
                                 Text(
-                                    text = "${match.streamSources.size} Streams",
+                                    text = "$enabledStreamsCount ${if (enabledStreamsCount == 1) "Stream" else "Streams"}",
                                     fontSize = 10.sp,
                                     fontWeight = FontWeight.Bold,
                                     color = TurquoisePrimary
                                 )
                             }
                         }
-                        if (match.isDemoData) {
-                            Spacer(modifier = Modifier.width(6.dp))
+                    } else {
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(NavySurface)
+                                .border(0.5.dp, NavyBorder, RoundedCornerShape(6.dp))
+                                .padding(horizontal = 6.dp, vertical = 2.dp)
+                        ) {
                             Text(
-                                text = "DEMO FEED",
-                                fontSize = 9.sp,
-                                fontWeight = FontWeight.SemiBold,
+                                text = "No stream assigned",
+                                fontSize = 10.sp,
                                 color = TextMuted
                             )
                         }
                     }
 
+                    if (match.isDemoData) {
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = "DEMO FEED",
+                            fontSize = 9.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = TextMuted
+                        )
+                    }
+                }
+
+                if (enabledStreamsCount > 0) {
                     Text(
                         text = "Watch Stream →",
                         fontSize = 11.sp,
                         fontWeight = FontWeight.SemiBold,
                         color = TurquoiseSecondary
+                    )
+                } else {
+                    Text(
+                        text = "Details",
+                        fontSize = 11.sp,
+                        color = TextMuted
                     )
                 }
             }

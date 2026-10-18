@@ -73,6 +73,19 @@ fun PlayerScreen(
     var isPlaying by remember { mutableStateOf(true) }
     var playbackError by remember { mutableStateOf<String?>(null) }
     var controlsVisible by remember { mutableStateOf(true) }
+    var hasTriedFallback by remember { mutableStateOf(false) }
+
+    // Automatic fallback stream attempt on playback error
+    LaunchedEffect(playbackError) {
+        if (playbackError != null && !hasTriedFallback) {
+            val fallback = initialStreamSources.firstOrNull { it.isBackup && it.id != selectedSource?.id }
+            if (fallback != null) {
+                hasTriedFallback = true
+                delay(1200)
+                selectedSource = fallback
+            }
+        }
+    }
 
     // ExoPlayer Instance
     val exoPlayer = remember {
@@ -249,7 +262,15 @@ fun PlayerScreen(
                             ) {
                                 Text("Retry", color = NavyBackground, fontWeight = FontWeight.Bold)
                             }
-                            if (initialStreamSources.size > 1) {
+                            val fallbackStream = initialStreamSources.firstOrNull { it.isBackup && it.id != selectedSource?.id }
+                            if (fallbackStream != null) {
+                                Button(
+                                    onClick = { selectedSource = fallbackStream },
+                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFF59E0B))
+                                ) {
+                                    Text("Switch to Fallback", color = NavyBackground, fontWeight = FontWeight.Bold)
+                                }
+                            } else if (initialStreamSources.size > 1) {
                                 OutlinedButton(
                                     onClick = {
                                         val nextIndex = (initialStreamSources.indexOf(selectedSource) + 1) % initialStreamSources.size
@@ -522,12 +543,29 @@ fun PlayerScreen(
                                             modifier = Modifier.size(16.dp)
                                         )
                                         Spacer(modifier = Modifier.width(6.dp))
-                                        Text(
-                                            text = source.label.uppercase(),
-                                            fontSize = 12.sp,
-                                            fontWeight = if (isChosen) FontWeight.Bold else FontWeight.SemiBold,
-                                            color = if (isChosen) TurquoisePrimary else Color.White
-                                        )
+                                        Column {
+                                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                                Text(
+                                                    text = source.label,
+                                                    fontSize = 12.sp,
+                                                    fontWeight = if (isChosen) FontWeight.Bold else FontWeight.SemiBold,
+                                                    color = if (isChosen) TurquoisePrimary else Color.White
+                                                )
+                                                if (source.isAuthorized) {
+                                                    Spacer(modifier = Modifier.width(4.dp))
+                                                    Text("✓", fontSize = 10.sp, color = Color(0xFF10B981), fontWeight = FontWeight.Bold)
+                                                }
+                                                if (source.isBackup) {
+                                                    Spacer(modifier = Modifier.width(4.dp))
+                                                    Text("(Fallback)", fontSize = 9.sp, color = Color(0xFFF59E0B))
+                                                }
+                                            }
+                                            Text(
+                                                text = "${source.quality} • ${source.language}",
+                                                fontSize = 9.sp,
+                                                color = if (isChosen) TurquoiseSecondary else TextMuted
+                                            )
+                                        }
                                     }
                                 }
                             }

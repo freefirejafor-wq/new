@@ -9,6 +9,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.CloudOff
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.SearchOff
 import androidx.compose.material.icons.filled.Warning
@@ -25,6 +26,7 @@ import androidx.compose.ui.unit.sp
 import com.example.data.model.*
 import com.example.ui.components.*
 import com.example.ui.theme.*
+import com.example.util.DateTimeHelper
 
 @Composable
 fun HomeScreen(
@@ -54,7 +56,7 @@ fun HomeScreen(
         counts
     }
 
-    val liveCount = remember(matches) { matches.count { it.matchStatus == MatchStatus.LIVE } }
+    val liveCount = remember(matches) { matches.count { it.matchStatus == MatchStatus.LIVE || it.matchStatus == MatchStatus.HALFTIME } }
     val upcomingCount = remember(matches) { matches.count { it.matchStatus == MatchStatus.UPCOMING } }
     val finishedCount = remember(matches) { matches.count { it.matchStatus == MatchStatus.FINISHED } }
 
@@ -66,7 +68,7 @@ fun HomeScreen(
             // Status filter
             val matchesStatus = when (selectedStatus) {
                 StatusFilter.ALL -> true
-                StatusFilter.LIVE -> match.matchStatus == MatchStatus.LIVE
+                StatusFilter.LIVE -> match.matchStatus == MatchStatus.LIVE || match.matchStatus == MatchStatus.HALFTIME
                 StatusFilter.UPCOMING -> match.matchStatus == MatchStatus.UPCOMING
                 StatusFilter.FINISHED -> match.matchStatus == MatchStatus.FINISHED
             }
@@ -131,8 +133,125 @@ fun HomeScreen(
             }
         }
 
+        // SYNC STATUS INDICATORS (Live, Synced X ago, Sync paused, Sync error, Using cached data, No API key configured)
+        val isMissingApiKey = systemConfig?.sportsApiProvider?.contains("API-Football", ignoreCase = true) == true && systemConfig.sportsApiKey.isBlank()
+
+        if (isMissingApiKey) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 14.dp, vertical = 4.dp)
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(Color(0xFFF59E0B).copy(alpha = 0.15f))
+                    .border(1.dp, Color(0xFFF59E0B).copy(alpha = 0.4f), RoundedCornerShape(10.dp))
+                    .padding(horizontal = 12.dp, vertical = 8.dp)
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                        Icon(
+                            imageVector = Icons.Default.Warning,
+                            contentDescription = "Key missing",
+                            tint = Color(0xFFF59E0B),
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "No API key configured — Using cached / fallback data",
+                            fontSize = 11.sp,
+                            color = Color.White
+                        )
+                    }
+                    if (isAdminLoggedIn) {
+                        Text(
+                            text = "Configure",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = TurquoisePrimary,
+                            modifier = Modifier.clickable { onOpenAdmin() }
+                        )
+                    }
+                }
+            }
+        } else if (systemConfig?.lastSyncStatus == "ERROR") {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 14.dp, vertical = 4.dp)
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(Color(0xFFEF4444).copy(alpha = 0.15f))
+                    .border(1.dp, Color(0xFFEF4444).copy(alpha = 0.4f), RoundedCornerShape(10.dp))
+                    .padding(horizontal = 12.dp, vertical = 8.dp)
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                        Icon(
+                            imageVector = Icons.Default.CloudOff,
+                            contentDescription = "Sync error",
+                            tint = Color(0xFFEF4444),
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "Sync error • Using cached data (${DateTimeHelper.formatSyncedAgo(systemConfig.lastSyncTimestamp ?: 0)})",
+                            fontSize = 11.sp,
+                            color = Color.White
+                        )
+                    }
+                    Text(
+                        text = "Retry",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = TurquoisePrimary,
+                        modifier = Modifier.clickable { onRefresh() }
+                    )
+                }
+            }
+        } else {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 2.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                val syncedAgoText = DateTimeHelper.formatSyncedAgo(systemConfig?.lastSyncTimestamp ?: 0)
+                Text(
+                    text = syncedAgoText,
+                    fontSize = 10.sp,
+                    color = TextMuted
+                )
+                if (systemConfig?.autoSyncEnabled == false) {
+                    Text(
+                        text = "⏸ Sync paused",
+                        fontSize = 10.sp,
+                        color = Color(0xFFF59E0B)
+                    )
+                } else if (liveCount > 0) {
+                    Text(
+                        text = "● Live (Auto-sync active)",
+                        fontSize = 10.sp,
+                        color = NeonLiveRed
+                    )
+                } else {
+                    Text(
+                        text = "● Auto-sync active",
+                        fontSize = 10.sp,
+                        color = Color(0xFF10B981)
+                    )
+                }
+            }
+        }
+
         // DEMO DATA TRANSPARENCY NOTICE (as requested by prompt)
-        if (systemConfig?.isUsingDemoData != false) {
+        if (systemConfig?.isUsingDemoData == true) {
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
