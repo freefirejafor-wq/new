@@ -16,7 +16,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
@@ -37,17 +36,15 @@ fun SportFilterChips(
     LazyRow(
         modifier = modifier
             .fillMaxWidth()
-            .padding(vertical = 8.dp),
+            .padding(vertical = 7.dp),
         contentPadding = PaddingValues(horizontal = 14.dp),
-        horizontalArrangement = Arrangement.spacedBy(10.dp)
+        horizontalArrangement = Arrangement.spacedBy(11.dp)
     ) {
         items(sports) { sport ->
             val isSelected = sport.id == selectedSportId
-            val count = matchCounts[sport.id] ?: 0
-
             SportChipItem(
                 sport = sport,
-                count = count,
+                count = matchCounts[sport.id] ?: 0,
                 isSelected = isSelected,
                 onClick = { onSportSelected(sport.id) }
             )
@@ -62,9 +59,9 @@ private fun SportChipItem(
     isSelected: Boolean,
     onClick: () -> Unit
 ) {
-    val iconVector: ImageVector = when (sport.id) {
+    val iconVector: ImageVector = when (sport.id.lowercase()) {
         "all" -> Icons.Default.AllInclusive
-        "football" -> Icons.Default.SportsSoccer
+        "football", "soccer" -> Icons.Default.SportsSoccer
         "cricket" -> Icons.Default.SportsCricket
         "basketball" -> Icons.Default.SportsBasketball
         "boxing" -> Icons.Default.SportsMma
@@ -73,83 +70,69 @@ private fun SportChipItem(
         else -> Icons.Default.Sports
     }
 
-    val backgroundBrush = if (isSelected) {
-        Brush.verticalGradient(
-            colors = listOf(
-                TurquoisePrimary.copy(alpha = 0.35f),
-                NavyCardElevated
-            )
-        )
-    } else {
-        Brush.verticalGradient(
-            colors = listOf(
-                NavyCard,
-                NavySurface
-            )
-        )
-    }
-
     Box(
         modifier = Modifier
-            .width(66.dp)
-            .height(58.dp)
-            .clip(RoundedCornerShape(16.dp))
-            .background(backgroundBrush)
+            .width(if (sport.id.equals("all", ignoreCase = true)) 82.dp else 62.dp)
+            .height(62.dp)
+            .clip(RoundedCornerShape(17.dp))
+            .background(NavyCard)
             .border(
                 width = if (isSelected) 1.5.dp else 1.dp,
                 color = if (isSelected) TurquoisePrimary else NavyBorder,
-                shape = RoundedCornerShape(16.dp)
+                shape = RoundedCornerShape(17.dp)
             )
             .clickable(onClick = onClick)
-            .testTag("sport_chip_${sport.id}"),
+            .testTag("sport_chip_" + sport.id),
         contentAlignment = Alignment.Center
     ) {
-        // Match count, or a dot for feeds whose count comes from an embedded provider.
         Box(
             modifier = Modifier
                 .align(Alignment.TopStart)
-                .padding(4.dp)
+                .padding(start = 3.dp, top = 3.dp)
                 .clip(CircleShape)
-                .background(if (isSelected) LivePulseDot else NavyCardElevated)
-                .border(0.5.dp, if (isSelected) Color.White.copy(alpha = 0.6f) else NavyBorder, CircleShape)
-                .padding(horizontal = if (count >= 0) 5.dp else 4.dp, vertical = 1.dp)
+                .background(LivePulseDot)
+                .border(0.5.dp, Color.White.copy(alpha = 0.65f), CircleShape)
+                .padding(horizontal = if (count >= 0) 4.dp else 5.dp, vertical = 1.dp),
+            contentAlignment = Alignment.Center
         ) {
             if (count >= 0) {
                 Text(
-                    text = "$count",
+                    text = count.toString(),
                     fontSize = 9.sp,
                     fontWeight = FontWeight.Bold,
-                    color = Color.White
+                    color = Color.White,
+                    maxLines = 1
                 )
             } else {
-                Box(
-                    modifier = Modifier
-                        .size(6.dp)
-                        .clip(CircleShape)
-                        .background(Color.White)
-                )
+                Box(Modifier.size(5.dp).clip(CircleShape).background(Color.White))
             }
         }
 
-        // Sport Icon and label
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center,
-            modifier = Modifier.padding(top = 4.dp)
-        ) {
+        if (sport.id.equals("all", ignoreCase = true)) {
+            Box(contentAlignment = Alignment.Center) {
+                Icon(
+                    imageVector = iconVector,
+                    contentDescription = sport.name,
+                    tint = Color.White,
+                    modifier = Modifier.size(34.dp)
+                )
+                Text(
+                    text = "ALL",
+                    fontSize = 7.sp,
+                    fontWeight = FontWeight.ExtraBold,
+                    color = Color.White,
+                    modifier = Modifier
+                        .align(Alignment.Center)
+                        .background(NavyCard.copy(alpha = 0.92f))
+                        .padding(horizontal = 2.dp)
+                )
+            }
+        } else {
             Icon(
                 imageVector = iconVector,
                 contentDescription = sport.name,
-                tint = if (isSelected) TurquoisePrimary else TextSecondary,
-                modifier = Modifier.size(22.dp)
-            )
-            Spacer(modifier = Modifier.height(2.dp))
-            Text(
-                text = sport.name,
-                fontSize = 10.sp,
-                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                color = if (isSelected) Color.White else TextSecondary,
-                maxLines = 1
+                tint = Color.White,
+                modifier = Modifier.size(35.dp)
             )
         }
     }

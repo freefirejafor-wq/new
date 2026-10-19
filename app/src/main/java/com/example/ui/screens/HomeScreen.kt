@@ -84,8 +84,7 @@ fun HomeScreen(
             matchesSport && matchesStatus && matchesSearch
         }
     }
-    val showCricketWidget =
-        (selectedSportId == "all" || selectedSportId == "cricket") && searchQuery.isBlank()
+    val showCricketWidget = selectedSportId == "cricket" && searchQuery.isBlank()
 
     Column(
         modifier = modifier
@@ -107,193 +106,6 @@ fun HomeScreen(
             isMaintenanceActive = systemConfig?.isMaintenanceMode == true,
             isAdminLoggedIn = isAdminLoggedIn
         )
-
-        // OWNER MAINTENANCE BANNER
-        if (systemConfig?.isMaintenanceMode == true) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 14.dp, vertical = 4.dp)
-                    .clip(RoundedCornerShape(10.dp))
-                    .background(LivePulseDot.copy(alpha = 0.15f))
-                    .border(1.dp, LivePulseDot.copy(alpha = 0.4f), RoundedCornerShape(10.dp))
-                    .padding(10.dp)
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        imageVector = Icons.Default.Warning,
-                        contentDescription = "Maintenance",
-                        tint = LivePulseDot,
-                        modifier = Modifier.size(18.dp)
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(
-                        text = systemConfig.maintenanceMessage,
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Medium,
-                        color = Color.White
-                    )
-                }
-            }
-        }
-
-        // SYNC STATUS INDICATORS (Live, Synced X ago, Sync paused, Sync error, Using cached data, No API key configured)
-        val isMissingApiKey = systemConfig?.sportsApiProvider?.contains("API-Football", ignoreCase = true) == true && systemConfig.sportsApiKey.isBlank()
-
-        if (isMissingApiKey) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 14.dp, vertical = 4.dp)
-                    .clip(RoundedCornerShape(10.dp))
-                    .background(Color(0xFFF59E0B).copy(alpha = 0.15f))
-                    .border(1.dp, Color(0xFFF59E0B).copy(alpha = 0.4f), RoundedCornerShape(10.dp))
-                    .padding(horizontal = 12.dp, vertical = 8.dp)
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
-                        Icon(
-                            imageVector = Icons.Default.Warning,
-                            contentDescription = "Key missing",
-                            tint = Color(0xFFF59E0B),
-                            modifier = Modifier.size(16.dp)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = "No API key configured — Using cached / fallback data",
-                            fontSize = 11.sp,
-                            color = Color.White
-                        )
-                    }
-                    if (isAdminLoggedIn) {
-                        Text(
-                            text = "Configure",
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = TurquoisePrimary,
-                            modifier = Modifier.clickable { onOpenAdmin() }
-                        )
-                    }
-                }
-            }
-        } else if (systemConfig?.lastSyncStatus == "ERROR") {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 14.dp, vertical = 4.dp)
-                    .clip(RoundedCornerShape(10.dp))
-                    .background(Color(0xFFEF4444).copy(alpha = 0.15f))
-                    .border(1.dp, Color(0xFFEF4444).copy(alpha = 0.4f), RoundedCornerShape(10.dp))
-                    .padding(horizontal = 12.dp, vertical = 8.dp)
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
-                        Icon(
-                            imageVector = Icons.Default.CloudOff,
-                            contentDescription = "Sync error",
-                            tint = Color(0xFFEF4444),
-                            modifier = Modifier.size(16.dp)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = "Sync error • Using cached data (${DateTimeHelper.formatSyncedAgo(systemConfig.lastSyncTimestamp ?: 0)})",
-                            fontSize = 11.sp,
-                            color = Color.White
-                        )
-                    }
-                    Text(
-                        text = "Retry",
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = TurquoisePrimary,
-                        modifier = Modifier.clickable { onRefresh() }
-                    )
-                }
-            }
-        } else {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 2.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                val syncedAgoText = DateTimeHelper.formatSyncedAgo(systemConfig?.lastSyncTimestamp ?: 0)
-                Text(
-                    text = syncedAgoText,
-                    fontSize = 10.sp,
-                    color = TextMuted
-                )
-                if (systemConfig?.autoSyncEnabled == false) {
-                    Text(
-                        text = "⏸ Sync paused",
-                        fontSize = 10.sp,
-                        color = Color(0xFFF59E0B)
-                    )
-                } else if (liveCount > 0) {
-                    Text(
-                        text = "● Live (Auto-sync active)",
-                        fontSize = 10.sp,
-                        color = NeonLiveRed
-                    )
-                } else {
-                    Text(
-                        text = "● Auto-sync active",
-                        fontSize = 10.sp,
-                        color = Color(0xFF10B981)
-                    )
-                }
-            }
-        }
-
-        // DEMO DATA TRANSPARENCY NOTICE (as requested by prompt)
-        if (systemConfig?.isUsingDemoData == true) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 14.dp, vertical = 4.dp)
-                    .clip(RoundedCornerShape(10.dp))
-                    .background(NavyCard)
-                    .border(0.5.dp, TurquoisePrimary.copy(alpha = 0.3f), RoundedCornerShape(10.dp))
-                    .padding(horizontal = 10.dp, vertical = 6.dp)
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
-                        Icon(
-                            imageVector = Icons.Default.Info,
-                            contentDescription = null,
-                            tint = TurquoisePrimary,
-                            modifier = Modifier.size(14.dp)
-                        )
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text(
-                            text = "DEMO DATA — Live preview fixtures. Real API sync configurable in Admin.",
-                            fontSize = 10.sp,
-                            color = TextSecondary
-                        )
-                    }
-                    Text(
-                        text = "Admin",
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = TurquoisePrimary,
-                        modifier = Modifier.clickable { onOpenAdmin() }
-                    )
-                }
-            }
-        }
 
         // HORIZONTALLY SCROLLABLE SPORTS FILTERS
         SportFilterChips(
@@ -365,7 +177,9 @@ fun HomeScreen(
                     MatchCard(
                         match = match,
                         onMatchClick = onMatchClick,
-                        onToggleFavorite = onToggleFavorite
+                        onToggleFavorite = onToggleFavorite,
+                        showFavoriteAction = false,
+                        showStreamCount = false
                     )
                 }
             }

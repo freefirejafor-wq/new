@@ -108,7 +108,7 @@ private fun StatusTabItem(
     Box(
         modifier = modifier
             .defaultMinSize(minWidth = 78.dp)
-            .height(38.dp)
+            .height(40.dp)
             .clip(RoundedCornerShape(20.dp))
             .background(if (isSelected) TurquoisePrimary.copy(alpha = 0.18f) else NavyCard)
             .border(
@@ -146,9 +146,9 @@ private fun StatusTabItem(
             }
             Text(
                 text = title,
-                fontSize = 12.sp,
+                fontSize = 14.sp,
                 fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                color = if (isSelected) TurquoisePrimary else TextSecondary,
+                color = if (isSelected) Color.White else TextSecondary,
                 maxLines = 1
             )
         }

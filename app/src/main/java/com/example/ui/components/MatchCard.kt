@@ -46,7 +46,9 @@ fun MatchCard(
     match: MatchEntity,
     onMatchClick: (MatchEntity) -> Unit,
     onToggleFavorite: (String, Boolean) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    showFavoriteAction: Boolean = true,
+    showStreamCount: Boolean = true
 ) {
     val infiniteTransition = rememberInfiniteTransition(label = "live-pulse-${match.id}")
     val dotAlpha by infiniteTransition.animateFloat(
@@ -63,8 +65,8 @@ fun MatchCard(
         modifier = modifier
             .fillMaxWidth()
             .padding(horizontal = 5.dp, vertical = 4.dp)
-            .clip(RoundedCornerShape(15.dp))
-            .border(1.dp, NavyBorder, RoundedCornerShape(15.dp))
+            .clip(RoundedCornerShape(12.dp))
+            .border(1.dp, NavyBorder, RoundedCornerShape(12.dp))
             .clickable { onMatchClick(match) }
             .testTag("match_card_${match.id}"),
         colors = CardDefaults.cardColors(containerColor = NavyCard),
@@ -100,7 +102,7 @@ fun MatchCard(
                     overflow = TextOverflow.Ellipsis,
                     letterSpacing = 0.2.sp
                 )
-                if (match.isDemoData) {
+                if (match.isDemoData && showFavoriteAction) {
                     Text(
                         text = "DEMO",
                         fontSize = 8.sp,
@@ -109,18 +111,20 @@ fun MatchCard(
                         modifier = Modifier.padding(start = 5.dp)
                     )
                 }
-                IconButton(
-                    onClick = { onToggleFavorite(match.id, match.isFavorite) },
-                    modifier = Modifier
-                        .size(26.dp)
-                        .testTag("fav_button_${match.id}")
-                ) {
-                    Icon(
-                        imageVector = if (match.isFavorite) Icons.Default.Star else Icons.Outlined.StarBorder,
-                        contentDescription = if (match.isFavorite) "Remove from favourites" else "Add to favourites",
-                        tint = if (match.isFavorite) GoldStar else TextMuted,
-                        modifier = Modifier.size(17.dp)
-                    )
+                if (showFavoriteAction) {
+                    IconButton(
+                        onClick = { onToggleFavorite(match.id, match.isFavorite) },
+                        modifier = Modifier
+                            .size(26.dp)
+                            .testTag("fav_button_${match.id}")
+                    ) {
+                        Icon(
+                            imageVector = if (match.isFavorite) Icons.Default.Star else Icons.Outlined.StarBorder,
+                            contentDescription = if (match.isFavorite) "Remove from favourites" else "Add to favourites",
+                            tint = if (match.isFavorite) GoldStar else TextMuted,
+                            modifier = Modifier.size(17.dp)
+                        )
+                    }
                 }
             }
 
@@ -153,7 +157,7 @@ fun MatchCard(
             }
 
             val enabledStreams = match.streamSources.count { it.isEnabled }
-            if (enabledStreams > 0) {
+            if (enabledStreams > 0 && showStreamCount) {
                 Spacer(modifier = Modifier.height(7.dp))
                 Text(
                     text = "▶  Watch stream · $enabledStreams",
@@ -222,16 +226,9 @@ private fun MatchStatusAndScore(
                             .background(LivePulseDot.copy(alpha = liveDotAlpha))
                     )
                     Spacer(modifier = Modifier.width(4.dp))
-                    Text("LIVE", fontSize = 10.sp, fontWeight = FontWeight.ExtraBold, color = NeonLiveRed)
+                    Text("Live", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = NeonLiveRed)
                 }
-                Text(
-                    text = "${match.scoreHome ?: 0} - ${match.scoreAway ?: 0}",
-                    fontSize = 16.sp,
-                    fontWeight = FontWeight.ExtraBold,
-                    color = TurquoisePrimary,
-                    maxLines = 1
-                )
-                Text(match.matchTime, fontSize = 9.sp, color = TextSecondary, maxLines = 1)
+                Text(match.matchTime, fontSize = 10.sp, color = Color.White, maxLines = 1)
             }
 
             MatchStatus.HALFTIME -> {
@@ -247,7 +244,6 @@ private fun MatchStatusAndScore(
             }
 
             MatchStatus.UPCOMING -> {
-                StatusLabel("UPCOMING", TurquoisePrimary)
                 Text(
                     text = match.matchTime,
                     fontSize = 12.sp,
@@ -257,7 +253,7 @@ private fun MatchStatusAndScore(
                 )
                 Text(
                     text = match.scheduledDate,
-                    fontSize = 8.sp,
+                    fontSize = 9.sp,
                     color = TurquoiseSecondary,
                     fontWeight = FontWeight.Medium,
                     maxLines = 1

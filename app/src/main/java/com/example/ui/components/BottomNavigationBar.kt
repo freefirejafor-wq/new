@@ -43,8 +43,9 @@ fun MatchoraBottomBar(
         color = NavySurface,
         modifier = modifier
             .fillMaxWidth()
-            .border(width = 1.dp, color = NavyBorder, shape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp))
-            .clip(RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp))
+            .padding(horizontal = 14.dp, vertical = 7.dp)
+            .border(width = 1.dp, color = NavyBorder, shape = RoundedCornerShape(26.dp))
+            .clip(RoundedCornerShape(26.dp))
     ) {
         Row(
             modifier = Modifier
@@ -138,42 +139,34 @@ private fun LiveCenterNavItem(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
         modifier = Modifier
+            .clip(RoundedCornerShape(18.dp))
+            .background(if (isSelected) TurquoisePrimary.copy(alpha = 0.14f) else Color.Transparent)
             .clickable(onClick = onClick)
-            .padding(horizontal = 8.dp)
+            .padding(horizontal = 9.dp, vertical = 5.dp)
             .testTag("nav_live_events")
     ) {
         Box(
-            modifier = Modifier
-                .size(42.dp)
-                .clip(CircleShape)
-                .background(if (isSelected) TurquoisePrimary else NavyCard)
-                .border(
-                    width = 1.5.dp,
-                    color = if (isSelected) Color.White else TurquoisePrimary.copy(alpha = 0.5f),
-                    shape = CircleShape
-                ),
+            modifier = Modifier.size(width = 54.dp, height = 32.dp),
             contentAlignment = Alignment.Center
         ) {
             Icon(
                 imageVector = Icons.Default.Sensors,
                 contentDescription = "Live Events",
-                tint = if (isSelected) NavyBackground else TurquoisePrimary,
+                tint = if (isSelected) TurquoisePrimary else TextSecondary,
                 modifier = Modifier.size(24.dp)
             )
-
             if (liveCount > 0) {
                 Box(
                     modifier = Modifier
                         .align(Alignment.TopEnd)
-                        .size(10.dp)
+                        .size(8.dp)
                         .clip(CircleShape)
                         .background(LivePulseDot)
                         .border(1.dp, Color.White, CircleShape)
                 )
             }
         }
-
-        Spacer(modifier = Modifier.height(3.dp))
+        Spacer(modifier = Modifier.height(2.dp))
         Text(
             text = "Live Events",
             fontSize = 11.sp,

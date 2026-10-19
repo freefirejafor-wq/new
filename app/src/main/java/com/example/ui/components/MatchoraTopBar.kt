@@ -2,10 +2,7 @@ package com.example.ui.components
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.*
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -20,15 +17,15 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.R
 import com.example.ui.theme.*
 
+@Suppress("UNUSED_PARAMETER")
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MatchoraTopBar(
@@ -43,7 +40,7 @@ fun MatchoraTopBar(
     isAdminLoggedIn: Boolean = false,
     modifier: Modifier = Modifier
 ) {
-    val infiniteTransition = rememberInfiniteTransition(label = "spin")
+    val infiniteTransition = rememberInfiniteTransition(label = "refresh")
     val rotation by infiniteTransition.animateFloat(
         initialValue = 0f,
         targetValue = 360f,
@@ -53,6 +50,7 @@ fun MatchoraTopBar(
         ),
         label = "refresh_rotation"
     )
+    val uriHandler = LocalUriHandler.current
 
     Surface(
         color = NavyBackground,
@@ -64,117 +62,62 @@ fun MatchoraTopBar(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 10.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
+                    .padding(start = 18.dp, end = 10.dp, top = 8.dp, bottom = 7.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                // Brand Left
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.clickable { onRefresh() }
+                Text(
+                    text = "Football Live Tv",
+                    modifier = Modifier.weight(1f),
+                    fontSize = 22.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White,
+                    maxLines = 1
+                )
+
+                IconButton(
+                    onClick = { runCatching { uriHandler.openUri("https://t.me/") } },
+                    modifier = Modifier.size(40.dp).testTag("top_telegram_button")
                 ) {
                     Box(
                         modifier = Modifier
-                            .size(38.dp)
+                            .size(29.dp)
                             .clip(CircleShape)
-                            .background(NavyCard)
-                            .border(1.dp, TurquoisePrimary.copy(alpha = 0.5f), CircleShape),
+                            .background(Color(0xFF229ED9)),
                         contentAlignment = Alignment.Center
                     ) {
-                        Image(
-                            painter = painterResource(id = R.drawable.ic_matchora_logo),
-                            contentDescription = "Matchora Icon",
-                            modifier = Modifier.size(32.dp)
+                        Icon(
+                            imageVector = Icons.Default.Send,
+                            contentDescription = "Telegram",
+                            tint = Color.White,
+                            modifier = Modifier.size(16.dp)
                         )
-                    }
-
-                    Spacer(modifier = Modifier.width(10.dp))
-
-                    Column {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(
-                                text = "Matchora",
-                                fontSize = 22.sp,
-                                fontWeight = FontWeight.ExtraBold,
-                                color = Color.White,
-                                letterSpacing = 0.5.sp
-                            )
-                            if (isAdminLoggedIn) {
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Box(
-                                    modifier = Modifier
-                                        .clip(RoundedCornerShape(4.dp))
-                                        .background(TurquoisePrimary.copy(alpha = 0.2f))
-                                        .padding(horizontal = 4.dp, vertical = 1.dp)
-                                ) {
-                                    Text(
-                                        text = "OWNER",
-                                        fontSize = 9.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = TurquoisePrimary
-                                    )
-                                }
-                            }
-                        }
-                        if (isMaintenanceActive) {
-                            Text(
-                                text = "Maintenance Mode Active",
-                                fontSize = 10.sp,
-                                color = LivePulseDot,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                        }
                     }
                 }
 
-                // Actions Right
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    // Search Action
-                    IconButton(
-                        onClick = onToggleSearch,
-                        modifier = Modifier
-                            .size(42.dp)
-                            .testTag("top_search_button")
-                    ) {
-                        Icon(
-                            imageVector = if (isSearching) Icons.Default.Close else Icons.Default.Search,
-                            contentDescription = "Search",
-                            tint = if (isSearching) TurquoisePrimary else Color.White
-                        )
-                    }
+                IconButton(
+                    onClick = onRefresh,
+                    modifier = Modifier.size(40.dp).testTag("top_refresh_button")
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Refresh,
+                        contentDescription = "Refresh",
+                        tint = if (isSyncing) TurquoisePrimary else Color.White,
+                        modifier = if (isSyncing) Modifier.rotate(rotation) else Modifier
+                    )
+                }
 
-                    // Refresh Action
-                    IconButton(
-                        onClick = onRefresh,
-                        modifier = Modifier
-                            .size(42.dp)
-                            .testTag("top_refresh_button")
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Refresh,
-                            contentDescription = "Refresh",
-                            tint = if (isSyncing) TurquoisePrimary else Color.White,
-                            modifier = if (isSyncing) Modifier.rotate(rotation) else Modifier
-                        )
-                    }
-
-                    // Admin / Settings Action
-                    IconButton(
-                        onClick = onOpenAdmin,
-                        modifier = Modifier
-                            .size(42.dp)
-                            .testTag("top_admin_button")
-                    ) {
-                        Icon(
-                            imageVector = if (isAdminLoggedIn) Icons.Default.AdminPanelSettings else Icons.Default.Settings,
-                            contentDescription = "Admin & Settings",
-                            tint = if (isAdminLoggedIn) TurquoisePrimary else TextSecondary
-                        )
-                    }
+                IconButton(
+                    onClick = onToggleSearch,
+                    modifier = Modifier.size(40.dp).testTag("top_search_button")
+                ) {
+                    Icon(
+                        imageVector = if (isSearching) Icons.Default.Close else Icons.Default.Search,
+                        contentDescription = "Search",
+                        tint = if (isSearching) TurquoisePrimary else Color.White
+                    )
                 }
             }
 
-            // Expanding Search Bar
             AnimatedVisibility(visible = isSearching) {
                 OutlinedTextField(
                     value = searchQuery,
@@ -191,11 +134,7 @@ fun MatchoraTopBar(
                         )
                     },
                     leadingIcon = {
-                        Icon(
-                            Icons.Default.Search,
-                            contentDescription = null,
-                            tint = TurquoisePrimary
-                        )
+                        Icon(Icons.Default.Search, contentDescription = null, tint = TurquoisePrimary)
                     },
                     trailingIcon = {
                         if (searchQuery.isNotEmpty()) {
