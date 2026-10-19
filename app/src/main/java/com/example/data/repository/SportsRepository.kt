@@ -24,6 +24,7 @@ class SportsRepository(private val context: Context) {
     private val database = MatchoraDatabase.getDatabase(context)
     private val dao = database.matchoraDao()
     private val prefs: SharedPreferences = context.getSharedPreferences("matchora_owner_prefs", Context.MODE_PRIVATE)
+    private val espnSoccerProvider = EspnSoccerProvider()
 
     private val _isAdminAuthenticated = MutableStateFlow(false)
     val isAdminAuthenticated: StateFlow<Boolean> = _isAdminAuthenticated.asStateFlow()
@@ -478,7 +479,7 @@ class SportsRepository(private val context: Context) {
         val provider: SportsMatchProvider = if (currentConfig.sportsApiProvider.contains("API-Football", ignoreCase = true)) {
             ApiFootballProvider(apiKey = currentConfig.sportsApiKey, baseEndpoint = currentConfig.sportsApiEndpoint)
         } else {
-            EspnSoccerProvider()
+            espnSoccerProvider
         }
 
         val result = provider.fetchLiveAndUpcomingMatches()
@@ -492,6 +493,11 @@ class SportsRepository(private val context: Context) {
 
                         val scheduledDateStr = DateTimeHelper.formatMatchDate(pMatch.utcTimestamp, currentConfig.displayTimezone)
                         val startsInStr = DateTimeHelper.formatStartsInText(pMatch.utcTimestamp, pMatch.matchStatus)
+                        val displayMatchTime = if (pMatch.matchStatus == MatchStatus.UPCOMING) {
+                            DateTimeHelper.formatMatchTime(pMatch.utcTimestamp, currentConfig.displayTimezone)
+                        } else {
+                            pMatch.clockText
+                        }
 
                         val matchToInsert = if (existing != null) {
                             if (existing.isManuallyOverridden) {
@@ -500,7 +506,7 @@ class SportsRepository(private val context: Context) {
                                     rawProviderScoreHome = pMatch.scoreHome,
                                     rawProviderScoreAway = pMatch.scoreAway,
                                     rawProviderStatus = pMatch.matchStatus,
-                                    rawProviderMatchTime = pMatch.clockText,
+                                    rawProviderMatchTime = displayMatchTime,
                                     competition = pMatch.competition,
                                     homeTeam = pMatch.homeTeam,
                                     homeLogoUrl = pMatch.homeLogoUrl ?: existing.homeLogoUrl,
@@ -523,11 +529,11 @@ class SportsRepository(private val context: Context) {
                                     scoreHome = pMatch.scoreHome,
                                     scoreAway = pMatch.scoreAway,
                                     matchStatus = pMatch.matchStatus,
-                                    matchTime = pMatch.clockText,
+                                    matchTime = displayMatchTime,
                                     rawProviderScoreHome = pMatch.scoreHome,
                                     rawProviderScoreAway = pMatch.scoreAway,
                                     rawProviderStatus = pMatch.matchStatus,
-                                    rawProviderMatchTime = pMatch.clockText,
+                                    rawProviderMatchTime = displayMatchTime,
                                     utcTimestamp = pMatch.utcTimestamp,
                                     scheduledDate = scheduledDateStr,
                                     startsInText = startsInStr,
@@ -552,11 +558,11 @@ class SportsRepository(private val context: Context) {
                                 scoreHome = pMatch.scoreHome,
                                 scoreAway = pMatch.scoreAway,
                                 matchStatus = pMatch.matchStatus,
-                                matchTime = pMatch.clockText,
+                                matchTime = displayMatchTime,
                                 rawProviderScoreHome = pMatch.scoreHome,
                                 rawProviderScoreAway = pMatch.scoreAway,
                                 rawProviderStatus = pMatch.matchStatus,
-                                rawProviderMatchTime = pMatch.clockText,
+                                rawProviderMatchTime = displayMatchTime,
                                 utcTimestamp = pMatch.utcTimestamp,
                                 scheduledDate = scheduledDateStr,
                                 startsInText = startsInStr,

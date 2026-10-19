@@ -53,6 +53,8 @@ fun HomeScreen(
         matches.forEach { match ->
             counts[match.sportId] = (counts[match.sportId] ?: 0) + 1
         }
+        // Cricket match totals are served by the embedded score provider rather than Room.
+        counts["cricket"] = -1
         counts
     }
 
@@ -82,6 +84,8 @@ fun HomeScreen(
             matchesSport && matchesStatus && matchesSearch
         }
     }
+    val showCricketWidget =
+        (selectedSportId == "all" || selectedSportId == "cricket") && searchQuery.isBlank()
 
     Column(
         modifier = modifier
@@ -310,7 +314,7 @@ fun HomeScreen(
         )
 
         // MATCHES LIST
-        if (filteredMatches.isEmpty()) {
+        if (filteredMatches.isEmpty() && !showCricketWidget) {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
@@ -349,6 +353,11 @@ fun HomeScreen(
                     .padding(top = 4.dp),
                 contentPadding = PaddingValues(bottom = 16.dp)
             ) {
+                if (showCricketWidget) {
+                    item(key = "cricwaves_cricket_feed") {
+                        CricwavesWidget(filter = selectedStatus)
+                    }
+                }
                 items(
                     items = filteredMatches,
                     key = { it.id }

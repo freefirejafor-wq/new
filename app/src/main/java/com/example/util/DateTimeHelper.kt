@@ -41,7 +41,7 @@ object DateTimeHelper {
 
     fun formatMatchDate(timestamp: Long, timezoneId: String = BANGLADESH_TZ): String {
         if (timestamp <= 0) return ""
-        val sdf = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault()).apply {
+        val sdf = SimpleDateFormat("EEE, dd MMM yyyy", Locale.US).apply {
             timeZone = resolveTimeZone(timezoneId)
         }
         return sdf.format(Date(timestamp))
@@ -49,7 +49,7 @@ object DateTimeHelper {
 
     fun formatMatchTime(timestamp: Long, timezoneId: String = BANGLADESH_TZ): String {
         if (timestamp <= 0) return ""
-        val sdf = SimpleDateFormat("hh:mm a", Locale.getDefault()).apply {
+        val sdf = SimpleDateFormat("hh:mm a", Locale.US).apply {
             timeZone = resolveTimeZone(timezoneId)
         }
         return sdf.format(Date(timestamp))

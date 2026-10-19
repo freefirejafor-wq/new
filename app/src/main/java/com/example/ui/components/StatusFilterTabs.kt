@@ -5,6 +5,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -53,42 +54,44 @@ fun StatusFilterTabs(
         label = "live_dot_alpha"
     )
 
-    Row(
+    LazyRow(
         modifier = modifier
             .fillMaxWidth()
-            .padding(horizontal = 14.dp, vertical = 6.dp),
+            .padding(vertical = 6.dp),
+        contentPadding = PaddingValues(horizontal = 14.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        StatusTabItem(
-            title = "All ($allCount)",
-            isSelected = selectedFilter == StatusFilter.ALL,
-            showCheck = selectedFilter == StatusFilter.ALL,
-            modifier = Modifier.weight(1f),
-            onClick = { onFilterSelected(StatusFilter.ALL) }
-        )
-
-        StatusTabItem(
-            title = "Live ($liveCount)",
-            isSelected = selectedFilter == StatusFilter.LIVE,
-            showLiveDot = true,
-            liveDotAlpha = liveAlpha,
-            modifier = Modifier.weight(1f),
-            onClick = { onFilterSelected(StatusFilter.LIVE) }
-        )
-
-        StatusTabItem(
-            title = "Upcoming ($upcomingCount)",
-            isSelected = selectedFilter == StatusFilter.UPCOMING,
-            modifier = Modifier.weight(1.3f),
-            onClick = { onFilterSelected(StatusFilter.UPCOMING) }
-        )
-
-        StatusTabItem(
-            title = "Finished ($finishedCount)",
-            isSelected = selectedFilter == StatusFilter.FINISHED,
-            modifier = Modifier.weight(1.2f),
-            onClick = { onFilterSelected(StatusFilter.FINISHED) }
-        )
+        item {
+            StatusTabItem(
+                title = "All ($allCount)",
+                isSelected = selectedFilter == StatusFilter.ALL,
+                showCheck = selectedFilter == StatusFilter.ALL,
+                onClick = { onFilterSelected(StatusFilter.ALL) }
+            )
+        }
+        item {
+            StatusTabItem(
+                title = "Live ($liveCount)",
+                isSelected = selectedFilter == StatusFilter.LIVE,
+                showLiveDot = true,
+                liveDotAlpha = liveAlpha,
+                onClick = { onFilterSelected(StatusFilter.LIVE) }
+            )
+        }
+        item {
+            StatusTabItem(
+                title = "Upcoming ($upcomingCount)",
+                isSelected = selectedFilter == StatusFilter.UPCOMING,
+                onClick = { onFilterSelected(StatusFilter.UPCOMING) }
+            )
+        }
+        item {
+            StatusTabItem(
+                title = "Finished ($finishedCount)",
+                isSelected = selectedFilter == StatusFilter.FINISHED,
+                onClick = { onFilterSelected(StatusFilter.FINISHED) }
+            )
+        }
     }
 }
 
@@ -104,6 +107,7 @@ private fun StatusTabItem(
 ) {
     Box(
         modifier = modifier
+            .defaultMinSize(minWidth = 78.dp)
             .height(38.dp)
             .clip(RoundedCornerShape(20.dp))
             .background(if (isSelected) TurquoisePrimary.copy(alpha = 0.18f) else NavyCard)

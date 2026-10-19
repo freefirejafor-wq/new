@@ -104,7 +104,7 @@ private fun SportChipItem(
             .testTag("sport_chip_${sport.id}"),
         contentAlignment = Alignment.Center
     ) {
-        // Count badge on top left
+        // Match count, or a dot for feeds whose count comes from an embedded provider.
         Box(
             modifier = Modifier
                 .align(Alignment.TopStart)
@@ -112,14 +112,23 @@ private fun SportChipItem(
                 .clip(CircleShape)
                 .background(if (isSelected) LivePulseDot else NavyCardElevated)
                 .border(0.5.dp, if (isSelected) Color.White.copy(alpha = 0.6f) else NavyBorder, CircleShape)
-                .padding(horizontal = 5.dp, vertical = 1.dp)
+                .padding(horizontal = if (count >= 0) 5.dp else 4.dp, vertical = 1.dp)
         ) {
-            Text(
-                text = "$count",
-                fontSize = 9.sp,
-                fontWeight = FontWeight.Bold,
-                color = Color.White
-            )
+            if (count >= 0) {
+                Text(
+                    text = "$count",
+                    fontSize = 9.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White
+                )
+            } else {
+                Box(
+                    modifier = Modifier
+                        .size(6.dp)
+                        .clip(CircleShape)
+                        .background(Color.White)
+                )
+            }
         }
 
         // Sport Icon and label

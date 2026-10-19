@@ -3,10 +3,20 @@ package com.example.data.api
 import com.example.data.model.MatchStatus
 import com.example.util.DateTimeHelper
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.json.JSONObject
+import java.text.SimpleDateFormat
+import java.util.Calendar
+import java.util.Date
+import java.util.Locale
+import java.util.TimeZone
 import java.util.concurrent.TimeUnit
 
 class EspnSoccerProvider(
@@ -30,38 +40,113 @@ class EspnSoccerProvider(
         "fra.1"            // Ligue 1
     )
 
+    private val scheduleCacheLock = Any()
+    private var cachedUpcomingMatches: List<ProviderMatchData> = emptyList()
+    private var lastScheduleAttemptAt = 0L
+    private var lastScheduleFetchAt = 0L
+
+    private data class ScoreboardFetch(
+        val success: Boolean,
+        val matches: List<ProviderMatchData> = emptyList(),
+        val error: Exception? = null
+    )
+
     override suspend fun fetchLiveAndUpcomingMatches(): Result<List<ProviderMatchData>> = withContext(Dispatchers.IO) {
-        val allMatches = mutableListOf<ProviderMatchData>()
-        var successCount = 0
-        var lastException: Exception? = null
+        val now = System.currentTimeMillis()
+        val today = formatEspnDate(now)
+        val todayResults = fetchScoreboards(defaultLeagues.map { it to today })
+        val todayMatches = todayResults.filter { it.success }.flatMap { it.matches }
 
-        for (league in defaultLeagues) {
-            try {
-                val url = "https://site.api.espn.com/apis/site/v2/sports/soccer/$league/scoreboard"
-                val request = Request.Builder()
-                    .url(url)
-                    .header("User-Agent", "Matchora/1.0 (Android; Sports Scoreboard Client)")
-                    .get()
-                    .build()
-
-                client.newCall(request).execute().use { response ->
-                    if (!response.isSuccessful) return@use
-                    val bodyString = response.body?.string() ?: return@use
-                    val matches = parseEspnScoreboard(bodyString)
-                    allMatches.addAll(matches)
-                    successCount++
+        var scheduleSucceeded = false
+        if (shouldRefreshSchedule(now)) {
+            val futureDates = (1..7).map { offset ->
+                val calendar = Calendar.getInstance(TimeZone.getTimeZone("UTC"), Locale.US).apply {
+                    timeInMillis = now
+                    add(Calendar.DAY_OF_YEAR, offset)
                 }
-            } catch (e: Exception) {
-                lastException = e
+                formatEspnDate(calendar.timeInMillis)
+            }
+            val scheduleResults = fetchScoreboards(
+                defaultLeagues.flatMap { league -> futureDates.map { date -> league to date } }
+            )
+            val successfulResults = scheduleResults.filter { it.success }
+            scheduleSucceeded = successfulResults.isNotEmpty()
+            if (scheduleSucceeded) {
+                synchronized(scheduleCacheLock) {
+                    cachedUpcomingMatches = successfulResults
+                        .flatMap { it.matches }
+                        .filter { it.matchStatus == MatchStatus.UPCOMING }
+                        .distinctBy { it.id }
+                    lastScheduleFetchAt = now
+                }
             }
         }
 
-        if (successCount > 0 || allMatches.isNotEmpty()) {
+        val cachedUpcoming = synchronized(scheduleCacheLock) {
+            cachedUpcomingMatches.filter { it.utcTimestamp > now }
+        }
+        val allMatches = (todayMatches + cachedUpcoming).distinctBy { it.id }
+
+        if (todayResults.any { it.success } || scheduleSucceeded) {
             Result.success(allMatches)
         } else {
-            Result.failure(lastException ?: IllegalStateException("Unable to fetch soccer fixtures from ESPN scoreboard"))
+            val error = todayResults.firstNotNullOfOrNull { it.error }
+                ?: IllegalStateException("Unable to fetch soccer fixtures from ESPN scoreboard")
+            Result.failure(error)
         }
     }
+
+    private suspend fun fetchScoreboards(requests: List<Pair<String, String>>): List<ScoreboardFetch> =
+        coroutineScope {
+            val semaphore = Semaphore(6)
+            requests.map { (league, date) ->
+                async(Dispatchers.IO) {
+                    semaphore.withPermit {
+                        fetchScoreboard(league, date)
+                    }
+                }
+            }.awaitAll()
+        }
+
+    private fun fetchScoreboard(league: String, date: String): ScoreboardFetch {
+        return try {
+            val url = "https://site.api.espn.com/apis/site/v2/sports/soccer/$league/scoreboard?dates=$date"
+            val request = Request.Builder()
+                .url(url)
+                .header("User-Agent", "Matchora/1.0 (Android; Sports Scoreboard Client)")
+                .get()
+                .build()
+
+            client.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) {
+                    ScoreboardFetch(
+                        success = false,
+                        error = IllegalStateException("ESPN returned HTTP ${response.code} for $league")
+                    )
+                } else {
+                    val bodyString = response.body?.string().orEmpty()
+                    ScoreboardFetch(success = true, matches = parseEspnScoreboard(bodyString))
+                }
+            }
+        } catch (e: Exception) {
+            ScoreboardFetch(success = false, error = e)
+        }
+    }
+
+    private fun shouldRefreshSchedule(now: Long): Boolean = synchronized(scheduleCacheLock) {
+        val retryDelay = if (lastScheduleFetchAt == 0L) 15 * 60 * 1000L else 4 * 60 * 60 * 1000L
+        if (now - lastScheduleAttemptAt < retryDelay) {
+            false
+        } else {
+            lastScheduleAttemptAt = now
+            true
+        }
+    }
+
+    private fun formatEspnDate(timestamp: Long): String =
+        SimpleDateFormat("yyyyMMdd", Locale.US).apply {
+            timeZone = TimeZone.getTimeZone("UTC")
+        }.format(Date(timestamp))
 
     private fun parseEspnScoreboard(jsonString: String): List<ProviderMatchData> {
         val result = mutableListOf<ProviderMatchData>()
